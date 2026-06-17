@@ -18,7 +18,12 @@ let isDragging = false;
 let dragStartY = 0;
 
 function formatHours(value) {
-    return parseFloat(value).toFixed(2);
+    const num = parseFloat(value);
+    if (isNaN(num)) return '0.00';
+    const fixed = num.toFixed(2);
+    const parts = fixed.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return parts.join('.');
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -152,6 +157,18 @@ function setupDragAndDrop() {
     const list = document.getElementById('stories-list');
     let pendingOrder = null;
 
+    function finishDrag() {
+        if (isDragging && pendingOrder) {
+            saveReorder();
+        }
+        isDragging = false;
+        pendingOrder = null;
+        document.querySelectorAll('.story-item-draggable').forEach(item => {
+            item.classList.remove('dragging');
+            item.classList.remove('drag-over');
+        });
+    }
+
     list.addEventListener('dragstart', (e) => {
         if (e.target.classList.contains('story-item-draggable')) {
             draggedItem = e.target;
@@ -161,18 +178,8 @@ function setupDragAndDrop() {
         }
     });
 
-    list.addEventListener('dragend', (e) => {
-        if (e.target.classList.contains('story-item-draggable')) {
-            e.target.classList.remove('dragging');
-        }
-        document.querySelectorAll('.story-item-draggable').forEach(item => {
-            item.classList.remove('drag-over');
-        });
-        if (isDragging && pendingOrder) {
-            saveReorder();
-        }
-        isDragging = false;
-        pendingOrder = null;
+    list.addEventListener('dragend', () => {
+        finishDrag();
     });
 
     list.addEventListener('dragover', (e) => {
@@ -181,6 +188,7 @@ function setupDragAndDrop() {
 
         const afterElement = getDragAfterElement(list, e.clientY);
         const current = document.querySelector('.dragging');
+        if (!current) return;
         if (afterElement == null) {
             list.appendChild(current);
         } else {
@@ -204,11 +212,9 @@ function setupDragAndDrop() {
         pendingOrder = Array.from(items).map(item => parseInt(item.dataset.id));
     });
 
-    list.addEventListener('mouseup', (e) => {
-        if (isDragging && pendingOrder) {
-            saveReorder();
-        }
-    });
+    list.addEventListener('mouseup', () => finishDrag());
+    list.addEventListener('touchend', () => finishDrag());
+    list.addEventListener('pointerup', () => finishDrag());
 
     async function saveReorder() {
         if (!pendingOrder) return;

@@ -2,7 +2,19 @@ import sqlite3
 import json
 from collections import defaultdict, deque
 from .database import get_conn, round_time, round_time
-from .config import get_config
+from .config import get_config, CONFIG_LIMITS
+
+
+def _format_cycle_path(path):
+    """格式化环路径，超过 10 节点截断显示前5后5加省略号"""
+    if path is True or path is None:
+        return "（路径不可用）"
+    path_list = list(path)
+    if len(path_list) > 10:
+        head = path_list[:5]
+        tail = path_list[-5:]
+        return ' → '.join(map(str, head)) + ' → … → ' + ' → '.join(map(str, tail))
+    return ' → '.join(map(str, path_list))
 
 
 def detect_cycle_directed(story_ids, edges):
@@ -195,20 +207,24 @@ def get_all_skills():
 
 
 def add_skill(name):
-    """添加技能（带 UNIQUE 约束保护）"""
+    """添加技能（带 UNIQUE 约束保护，大小写不敏感）"""
     name = name.strip()
     if not name:
         raise ValueError("技能名称不能为空")
     with get_conn() as conn:
         c = conn.cursor()
-        c.execute('SELECT id FROM skills WHERE name = ? COLLATE NOCASE', (name,))
+        c.execute('SELECT id, name FROM skills WHERE LOWER(name) = LOWER(?)', (name,))
         existing = c.fetchone()
         if existing:
-            raise ValueError(f"技能 '{name}' 已存在")
+            raise ValueError(f"技能 '{existing['name']}' 已存在（与 '{name}' 大小写不同但同名）")
         try:
             c.execute('INSERT INTO skills (name) VALUES (?)', (name,))
             return c.lastrowid
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as e:
+            c.execute('SELECT id, name FROM skills WHERE LOWER(name) = LOWER(?)', (name,))
+            existing = c.fetchone()
+            if existing:
+                raise ValueError(f"技能 '{existing['name']}' 已存在（与 '{name}' 大小写不同但同名）")
             raise ValueError(f"技能 '{name}' 已存在")
 
 
@@ -444,7 +460,7 @@ def add_dependency(story_id, depends_on_id):
     if cycle:
         cycle_type, path = cycle
         type_label = "有向环" if cycle_type == 'directed' else "无向环"
-        path_str = ' → '.join(map(str, path))
+        path_str = _format_cycle_path(path)
         raise ValueError(f"添加此依赖会形成{type_label}: {path_str}，已拒收")
     with get_conn() as conn:
         c = conn.cursor()
@@ -526,11 +542,13 @@ def _knapsack_01(items, capacity, skill_capacities):
 
     iteration_count = 0
     stop_threshold = max_iterations * 100000
+    hit_iteration_limit = False
 
     for i in range(n):
         for w in range(cap_int, -1, -1):
             iteration_count += 1
             if iteration_count > stop_threshold:
+                hit_iteration_limit = True
                 break
             if dp[w] == -1:
                 continue
@@ -555,6 +573,7 @@ def _knapsack_01(items, capacity, skill_capacities):
                 selected_items[new_w] = selected_items[w] + [i]
                 skill_usage_dp[new_w] = current_usage
         if iteration_count > stop_threshold:
+            hit_iteration_limit = True
             break
 
     best_idx = 0
@@ -565,6 +584,13 @@ def _knapsack_01(items, capacity, skill_capacities):
     selected = selected_items[best_idx]
     total_weight = best_idx / multiplier
     skill_usage_final = skill_usage_dp[best_idx]
+
+    if hit_iteration_limit:
+        max_limit = CONFIG_LIMITS.get('knapsack_max_iterations', (1, 10000))[1]
+        raise ValueError(
+            f"背包计算迭代次数超限（当前上限 {max_iterations}，系统最大允许 {max_limit}），"
+            f"请减少需求数量或调整 knapsack_max_iterations 配置（最大 {max_limit}）"
+        )
 
     return selected, dp[best_idx], total_weight, dict(skill_usage_final)
 
@@ -597,7 +623,7 @@ def run_planning():
     if cycle:
         cycle_type, path = cycle
         type_label = "有向环" if cycle_type == 'directed' else "无向环"
-        raise ValueError(f"检测到{type_label}: {' → '.join(map(str, path))}")
+        raise ValueError(f"检测到{type_label}: {_format_cycle_path(path)}")
 
     with get_conn() as conn:
         c = conn.cursor()

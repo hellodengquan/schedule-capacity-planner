@@ -45,6 +45,8 @@ def init_db():
             )
         ''')
 
+        c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name_lower ON skills (LOWER(name))')
+
         c.execute('''
             CREATE TABLE IF NOT EXISTS members (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
