@@ -1,0 +1,380 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: #f0f2f5;
+    color: #333;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 30px;
+    padding: 30px 0;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    color: white;
+}
+
+header h1 {
+    font-size: 2em;
+    margin-bottom: 8px;
+}
+
+header .subtitle {
+    opacity: 0.9;
+    font-size: 1em;
+}
+
+.tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    background: white;
+    border-radius: 10px;
+    padding: 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 12px 20px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 8px;
+    font-size: 0.95em;
+    color: #666;
+    transition: all 0.2s;
+}
+
+.tab-btn:hover {
+    background: #f0f0f0;
+}
+
+.tab-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.card {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.card h2 {
+    margin-bottom: 16px;
+    color: #333;
+    font-size: 1.2em;
+    border-bottom: 2px solid #f0f0f0;
+    padding-bottom: 10px;
+}
+
+.actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9em;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.btn-secondary {
+    background: #f0f0f0;
+    color: #333;
+}
+
+.btn-secondary:hover {
+    background: #e0e0e0;
+}
+
+.btn-danger {
+    background: #ff4757;
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #ff6b7a;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 0.8em;
+}
+
+.form-inline {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.form-inline input,
+.form-inline select {
+    padding: 10px 14px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 0.9em;
+    flex: 1;
+    min-width: 120px;
+}
+
+.form-inline input:focus,
+.form-inline select:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+table th,
+table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+table th {
+    background: #fafafa;
+    font-weight: 600;
+    color: #666;
+    font-size: 0.9em;
+}
+
+table tr:hover {
+    background: #fafafa;
+}
+
+.sprint-card {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    border-left: 4px solid #667eea;
+}
+
+.sprint-card.has-issues {
+    border-left-color: #ff4757;
+}
+
+.sprint-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.sprint-header h3 {
+    font-size: 1.2em;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.issue-badge {
+    background: #ff4757;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.75em;
+    font-weight: 500;
+}
+
+.capacity-bar {
+    height: 8px;
+    background: #f0f0f0;
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 8px 0 16px 0;
+}
+
+.capacity-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #52c41a, #73d13d);
+    border-radius: 4px;
+    transition: width 0.3s;
+}
+
+.capacity-fill.over {
+    background: linear-gradient(90deg, #ff4757, #ff6b7a);
+}
+
+.capacity-info {
+    font-size: 0.9em;
+    color: #666;
+    margin-bottom: 12px;
+}
+
+.story-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: #fafafa;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    border-left: 3px solid #52c41a;
+    transition: all 0.2s;
+}
+
+.story-item.over-capacity {
+    border-left-color: #ff4757;
+    background: #fff1f0;
+}
+
+.story-item.blocked {
+    border-left-color: #fa8c16;
+    background: #fff7e6;
+}
+
+.story-item.over-capacity.blocked {
+    border-left-color: #ff4757;
+    background: linear-gradient(135deg, #fff1f0 0%, #fff7e6 100%);
+}
+
+.story-info {
+    flex: 1;
+}
+
+.story-title {
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
+.story-meta {
+    font-size: 0.85em;
+    color: #999;
+}
+
+.story-tags {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+
+.tag {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75em;
+    font-weight: 500;
+}
+
+.tag-over {
+    background: #ff4757;
+    color: white;
+}
+
+.tag-blocked {
+    background: #fa8c16;
+    color: white;
+}
+
+.tag-priority {
+    background: #667eea;
+    color: white;
+}
+
+.story-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.story-deps {
+    font-size: 0.8em;
+    color: #999;
+    margin-top: 4px;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: #999;
+}
+
+.empty-state-icon {
+    font-size: 3em;
+    margin-bottom: 10px;
+}
+
+@media (max-width: 768px) {
+    .container {
+        padding: 10px;
+    }
+
+    header {
+        padding: 20px 0;
+    }
+
+    header h1 {
+        font-size: 1.5em;
+    }
+
+    .tabs {
+        flex-wrap: wrap;
+    }
+
+    .tab-btn {
+        flex: 1 1 30%;
+        font-size: 0.85em;
+        padding: 10px;
+    }
+
+    .form-inline {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .form-inline input,
+    .form-inline select {
+        width: 100%;
+    }
+}
