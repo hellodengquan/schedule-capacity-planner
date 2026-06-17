@@ -4,8 +4,9 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.database import init_db
+from src.database import init_db, round_time
 from src import planner
+from src.config import load_config, save_config, get_config, reset_config
 
 RED = '\033[91m'
 GREEN = '\033[92m'
@@ -23,15 +24,18 @@ def print_header(text):
 
 
 def print_menu():
-    print_header("排期容量规划工具 (增强版)")
+    config = load_config()
+    gran = config.get('time_granularity', 0.25)
+    print_header(f"排期容量规划工具 (增强版) | 粒度: {gran}小时")
     print(f"{GREEN}1.{END} 技能管理")
     print(f"{GREEN}2.{END} 成员管理")
     print(f"{GREEN}3.{END} 迭代管理")
     print(f"{GREEN}4.{END} 需求管理")
-    print(f"{GREEN}5.{END} 依赖管理 (自动环检测)")
+    print(f"{GREEN}5.{END} 依赖管理 (有向+无向环检测)")
     print(f"{GREEN}6.{END} 运行排期规划 (0-1背包算法)")
     print(f"{GREEN}7.{END} 查看规划结果")
     print(f"{GREEN}8.{END} 加载示例数据")
+    print(f"{GREEN}9.{END} 系统配置")
     print(f"{GREEN}0.{END} 退出")
     print()
 
@@ -100,7 +104,8 @@ def manage_members():
 
         if choice == '1':
             name = input("姓名: ").strip()
-            capacity = float(input("每迭代总容量(工时, 支持0.5小时精度): ").strip())
+            gran = get_config('time_granularity', 0.25)
+            capacity = float(input(f"每迭代总容量(工时, 支持{gran}小时精度): ").strip())
             planner.add_member(name, capacity)
             print(f"\n{GREEN}成员添加成功！{END}\n")
         elif choice == '2':
@@ -121,7 +126,8 @@ def manage_members():
                 print(f"  {s['id']}. {s['name']}")
             print()
             sid = int(input("技能ID: ").strip())
-            cap = float(input("该技能每迭代容量(工时, 支持0.5): ").strip())
+            gran = get_config('time_granularity', 0.25)
+            cap = float(input(f"该技能每迭代容量(工时, 支持{gran}): ").strip())
             planner.set_member_skill(mid, sid, cap)
             print(f"\n{GREEN}成员技能设置成功！{END}\n")
         elif choice == '0':
@@ -206,7 +212,8 @@ def manage_stories():
 
         if choice == '1':
             title = input("需求标题: ").strip()
-            estimate = float(input("预估工时(支持0.5小时精度): ").strip())
+            gran = get_config('time_granularity', 0.25)
+            estimate = float(input(f"预估工时(支持{gran}小时精度): ").strip())
             priority = int(input("优先级(数字越大越高): ").strip())
             planner.add_story(title, estimate, priority)
             print(f"\n{GREEN}需求添加成功！{END}\n")
@@ -230,7 +237,8 @@ def manage_stories():
                 print(f"  {s['id']}. {s['name']}")
             print()
             skill_id = int(input("技能ID: ").strip())
-            hours = float(input("该技能所需工时(支持0.5): ").strip())
+            gran = get_config('time_granularity', 0.25)
+            hours = float(input(f"该技能所需工时(支持{gran}): ").strip())
             planner.set_story_skill(sid, skill_id, hours)
             print(f"\n{GREEN}需求技能设置成功！{END}\n")
         elif choice == '5':
@@ -255,7 +263,9 @@ def manage_dependencies():
 
         cycle = planner.detect_cycle()
         if cycle:
-            print(f"{RED}⚠️  警告：检测到循环依赖！路径: {' → '.join(map(str, cycle))}{END}\n")
+            cycle_type, path = cycle
+            type_label = "有向环" if cycle_type == 'directed' else "无向环"
+            print(f"{RED}⚠️  警告：检测到{type_label}！路径: {' → '.join(map(str, path))}{END}\n")
 
         if not deps:
             print(f"{YELLOW}暂无依赖关系{END}\n")
@@ -455,6 +465,50 @@ def load_sample_data():
     print(f"  - 依赖: {len(deps)} 条\n")
 
 
+def manage_config():
+    while True:
+        print_header("系统配置")
+        config = load_config()
+        print("当前配置:")
+        print(f"  time_granularity: {config.get('time_granularity')} 小时 (工时粒度)")
+        print(f"  knapsack_max_iterations: {config.get('knapsack_max_iterations')} (背包迭代上限因子)")
+        print(f"  knapsack_max_items: {config.get('knapsack_max_items')} (单迭代需求上限)")
+        print(f"  default_capacity_per_sprint: {config.get('default_capacity_per_sprint')} (默认成员容量)")
+        print(f"  reorder_debounce_ms: {config.get('reorder_debounce_ms')} (排序防抖毫秒)")
+        print(f"  cycle_detection_undirected: {config.get('cycle_detection_undirected')} (无向环检测)")
+        print()
+        print(f"{GREEN}1.{END} 修改工时粒度")
+        print(f"{GREEN}2.{END} 修改背包迭代上限")
+        print(f"{GREEN}3.{END} 修改背包物品上限")
+        print(f"{GREEN}4.{END} 开启/关闭无向环检测")
+        print(f"{GREEN}5.{END} 重置为默认配置")
+        print(f"{GREEN}0.{END} 返回主菜单")
+        print()
+        choice = input("请选择: ").strip()
+
+        if choice == '1':
+            gran = float(input("工时粒度 (推荐: 0.25=15分钟, 0.5=30分钟, 1=1小时): ").strip())
+            save_config({'time_granularity': gran})
+            print(f"\n{GREEN}工时粒度已改为 {gran} 小时{END}\n")
+        elif choice == '2':
+            iters = int(input("背包迭代上限因子 (默认100, 越大越精确但越慢): ").strip())
+            save_config({'knapsack_max_iterations': iters})
+            print(f"\n{GREEN}迭代上限因子已改为 {iters}{END}\n")
+        elif choice == '3':
+            n = int(input("单迭代需求上限 (默认200, 超则截断): ").strip())
+            save_config({'knapsack_max_items': n})
+            print(f"\n{GREEN}物品上限已改为 {n}{END}\n")
+        elif choice == '4':
+            val = input("开启无向环检测? (y/n): ").strip().lower() == 'y'
+            save_config({'cycle_detection_undirected': val})
+            print(f"\n{GREEN}无向环检测已{'开启' if val else '关闭'}{END}\n")
+        elif choice == '5':
+            reset_config()
+            print(f"\n{GREEN}已重置为默认配置{END}\n")
+        elif choice == '0':
+            break
+
+
 def main():
     init_db()
 
@@ -478,6 +532,8 @@ def main():
             view_result()
         elif choice == '8':
             load_sample_data()
+        elif choice == '9':
+            manage_config()
         elif choice == '0':
             print(f"\n{GREEN}再见！{END}\n")
             break

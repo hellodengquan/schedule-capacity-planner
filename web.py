@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request, render_template
 
 from src.database import init_db
 from src import planner
+from src.config import load_config, save_config, reset_config, get_config
 
 app = Flask(__name__,
             template_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates'),
@@ -224,6 +225,24 @@ def run_planning():
 @app.route('/api/planning/result', methods=['GET'])
 def get_planning_result():
     return jsonify(planner.get_planning_result())
+
+
+@app.route('/api/config', methods=['GET'])
+def get_config_api():
+    return jsonify(load_config())
+
+
+@app.route('/api/config', methods=['POST'])
+def update_config_api():
+    data = request.json
+    save_config(data)
+    return jsonify({'success': True, 'config': load_config()})
+
+
+@app.route('/api/config/reset', methods=['POST'])
+def reset_config_api():
+    reset_config()
+    return jsonify({'success': True, 'config': load_config()})
 
 
 if __name__ == '__main__':

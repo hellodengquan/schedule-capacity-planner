@@ -1,6 +1,7 @@
 import sqlite3
 import os
 from contextlib import contextmanager
+from .config import get_config
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'planner.db')
 
@@ -25,6 +26,12 @@ def get_conn():
 
 def round_half_hour(value):
     return round(value * 2) / 2
+
+
+def round_time(value):
+    granularity = float(get_config('time_granularity', 0.25))
+    multiplier = 1.0 / granularity
+    return round(value * multiplier) / multiplier
 
 
 def init_db():

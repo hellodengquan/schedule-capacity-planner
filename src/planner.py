@@ -1,18 +1,12 @@
 import sqlite3
 import json
 from collections import defaultdict, deque
-from .database import get_conn, round_half_hour
+from .database import get_conn, round_time, round_time
+from .config import get_config
 
 
-def detect_cycle():
-    """检测依赖图中是否存在环，返回环路径或None"""
-    with get_conn() as conn:
-        c = conn.cursor()
-        c.execute('SELECT id FROM stories')
-        story_ids = [row['id'] for row in c.fetchall()]
-        c.execute('SELECT story_id, depends_on_id FROM dependencies')
-        edges = [(row['story_id'], row['depends_on_id']) for row in c.fetchall()]
-
+def detect_cycle_directed(story_ids, edges):
+    """有向环检测（拓扑排序）"""
     graph = defaultdict(list)
     in_degree = defaultdict(int)
     for sid in story_ids:
@@ -38,7 +32,11 @@ def detect_cycle():
             start = cycle_nodes[0]
             path = [start]
             current = start
+            guard = 0
             while True:
+                guard += 1
+                if guard > len(cycle_nodes) * 3:
+                    break
                 found = False
                 for story_id, depends_on_id in edges:
                     if depends_on_id == current and story_id in cycle_nodes:
@@ -50,15 +48,77 @@ def detect_cycle():
                     break
                 if current == start and len(path) > 1:
                     break
-                if len(path) > len(cycle_nodes) * 2:
-                    break
-            return path
-        return True
+            return ('directed', path)
+        return ('directed', True)
+    return None
+
+
+def detect_cycle_undirected(story_ids, edges):
+    """无向环检测（DFS），避免漏报"""
+    adj = defaultdict(set)
+    for a, b in edges:
+        adj[a].add(b)
+        adj[b].add(a)
+
+    visited = set()
+    parent = {}
+
+    def dfs(start):
+        stack = [(start, None)]
+        path_stack = []
+        while stack:
+            node, par = stack.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            parent[node] = par
+            path_stack.append(node)
+            for neighbor in adj[node]:
+                if neighbor not in visited:
+                    stack.append((neighbor, node))
+                elif neighbor != par:
+                    cycle = [neighbor]
+                    cur = node
+                    while cur != neighbor and cur is not None:
+                        cycle.append(cur)
+                        cur = parent.get(cur)
+                    cycle.append(neighbor)
+                    return list(reversed(cycle))
+        return None
+
+    story_ids_list = list(story_ids)
+    for sid in story_ids_list:
+        if sid not in visited:
+            cycle = dfs(sid)
+            if cycle:
+                return ('undirected', cycle)
+    return None
+
+
+def detect_cycle():
+    """检测依赖图中是否存在环（有向+无向双重检测）"""
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute('SELECT id FROM stories')
+        story_ids = [row['id'] for row in c.fetchall()]
+        c.execute('SELECT story_id, depends_on_id FROM dependencies')
+        edges = [(row['story_id'], row['depends_on_id']) for row in c.fetchall()]
+
+    directed_result = detect_cycle_directed(story_ids, edges)
+    if directed_result:
+        return directed_result
+
+    check_undirected = get_config('cycle_detection_undirected', True)
+    if check_undirected:
+        undirected_result = detect_cycle_undirected(story_ids, edges)
+        if undirected_result:
+            return undirected_result
+
     return None
 
 
 def check_cycle_if_add(story_id, depends_on_id):
-    """检查如果添加这条依赖是否会形成环"""
+    """检查如果添加这条依赖是否会形成环（有向+无向）"""
     with get_conn() as conn:
         c = conn.cursor()
         c.execute('SELECT story_id, depends_on_id FROM dependencies')
@@ -66,30 +126,20 @@ def check_cycle_if_add(story_id, depends_on_id):
         c.execute('SELECT id FROM stories')
         story_ids = {row['id'] for row in c.fetchall()}
 
-    edges.append((story_id, depends_on_id))
-    story_ids.add(story_id)
-    story_ids.add(depends_on_id)
-    story_ids = list(story_ids)
+    new_edges = edges + [(story_id, depends_on_id)]
+    new_story_ids = list(story_ids | {story_id, depends_on_id})
 
-    graph = defaultdict(list)
-    in_degree = defaultdict(int)
-    for sid in story_ids:
-        in_degree[sid] = 0
-    for s_id, d_id in edges:
-        graph[d_id].append(s_id)
-        in_degree[s_id] += 1
+    directed = detect_cycle_directed(new_story_ids, new_edges)
+    if directed:
+        return True
 
-    queue = deque([sid for sid in story_ids if in_degree[sid] == 0])
-    visited = 0
-    while queue:
-        node = queue.popleft()
-        visited += 1
-        for neighbor in graph[node]:
-            in_degree[neighbor] -= 1
-            if in_degree[neighbor] == 0:
-                queue.append(neighbor)
+    check_undirected = get_config('cycle_detection_undirected', True)
+    if check_undirected:
+        undirected = detect_cycle_undirected(new_story_ids, new_edges)
+        if undirected:
+            return True
 
-    return visited != len(story_ids)
+    return False
 
 
 def get_skill_capacity():
@@ -105,7 +155,7 @@ def get_skill_capacity():
         ''')
         return {row['skill_id']: {
             'name': row['skill_name'],
-            'capacity': round_half_hour(row['total_capacity'])
+            'capacity': round_time(row['total_capacity'])
         } for row in c.fetchall()}
 
 
@@ -166,7 +216,7 @@ def delete_skill(skill_id):
 
 def set_member_skill(member_id, skill_id, capacity_per_sprint):
     """设置成员的技能容量"""
-    capacity = round_half_hour(capacity_per_sprint)
+    capacity = round_time(capacity_per_sprint)
     with get_conn() as conn:
         c = conn.cursor()
         c.execute('''
@@ -186,7 +236,7 @@ def remove_member_skill(member_id, skill_id):
 
 def set_story_skill(story_id, skill_id, required_hours):
     """设置需求需要的技能工时"""
-    hours = round_half_hour(required_hours)
+    hours = round_time(required_hours)
     with get_conn() as conn:
         c = conn.cursor()
         c.execute('''
@@ -211,7 +261,7 @@ def get_sprint_capacity(sprint_id=None):
         c.execute('SELECT capacity_per_sprint FROM members')
         rows = c.fetchall()
         total = sum(row['capacity_per_sprint'] for row in rows)
-        return round_half_hour(total)
+        return round_time(total)
 
 
 def get_all_members():
@@ -221,14 +271,14 @@ def get_all_members():
         c.execute('SELECT * FROM members ORDER BY name')
         members = [dict(row) for row in c.fetchall()]
         for m in members:
-            m['capacity_per_sprint'] = round_half_hour(m['capacity_per_sprint'])
+            m['capacity_per_sprint'] = round_time(m['capacity_per_sprint'])
             m['skills'] = get_member_skills(m['id'])
         return members
 
 
 def add_member(name, capacity_per_sprint):
     """添加成员"""
-    capacity = round_half_hour(capacity_per_sprint)
+    capacity = round_time(capacity_per_sprint)
     with get_conn() as conn:
         c = conn.cursor()
         c.execute(
@@ -245,7 +295,7 @@ def update_member(member_id, name=None, capacity_per_sprint=None):
         if name is not None:
             c.execute('UPDATE members SET name = ? WHERE id = ?', (name, member_id))
         if capacity_per_sprint is not None:
-            capacity = round_half_hour(capacity_per_sprint)
+            capacity = round_time(capacity_per_sprint)
             c.execute('UPDATE members SET capacity_per_sprint = ? WHERE id = ?',
                       (capacity, member_id))
 
@@ -308,7 +358,7 @@ def get_all_stories():
         c.execute('SELECT * FROM stories ORDER BY display_order DESC, priority DESC, id')
         stories = [dict(row) for row in c.fetchall()]
         for story in stories:
-            story['estimate'] = round_half_hour(story['estimate'])
+            story['estimate'] = round_time(story['estimate'])
             story['dependencies'] = get_story_dependencies(story['id'])
             story['skills'] = get_story_skills(story['id'])
         return stories
@@ -325,13 +375,13 @@ def get_story_dependencies(story_id):
         ''', (story_id,))
         deps = [dict(row) for row in c.fetchall()]
         for d in deps:
-            d['estimate'] = round_half_hour(d['estimate'])
+            d['estimate'] = round_time(d['estimate'])
         return deps
 
 
 def add_story(title, estimate, priority=0):
     """添加需求"""
-    estimate = round_half_hour(estimate)
+    estimate = round_time(estimate)
     with get_conn() as conn:
         c = conn.cursor()
         c.execute('SELECT COALESCE(MAX(display_order), 0) + 1 FROM stories')
@@ -350,7 +400,7 @@ def update_story(story_id, title=None, estimate=None, priority=None, status=None
         if title is not None:
             c.execute('UPDATE stories SET title = ? WHERE id = ?', (title, story_id))
         if estimate is not None:
-            est = round_half_hour(estimate)
+            est = round_time(estimate)
             c.execute('UPDATE stories SET estimate = ? WHERE id = ?', (est, story_id))
         if priority is not None:
             c.execute('UPDATE stories SET priority = ? WHERE id = ?', (priority, story_id))
@@ -434,6 +484,7 @@ def _knapsack_01(items, capacity, skill_capacities):
     """
     0-1背包算法：在容量约束下选择价值最大的需求组合
     动态规划实现，时间复杂度 O(n * capacity)
+    支持配置化精度和迭代上限
     items: [(story, value, weight, skill_weights)]
     capacity: 总容量
     skill_capacities: {skill_id: {name, capacity}}
@@ -443,8 +494,18 @@ def _knapsack_01(items, capacity, skill_capacities):
     if n == 0:
         return [], 0, 0, {}
 
-    cap_int = int(capacity * 2)
-    weights_int = [int(item[2] * 2) for item in items]
+    max_items = int(get_config('knapsack_max_items', 200))
+    max_iterations = int(get_config('knapsack_max_iterations', 100))
+    granularity = float(get_config('time_granularity', 0.25))
+    multiplier = int(1.0 / granularity)
+
+    if n > max_items:
+        items_sorted = sorted(items, key=lambda x: x[1], reverse=True)
+        items = items_sorted[:max_items]
+        n = max_items
+
+    cap_int = int(capacity * multiplier)
+    weights_int = [int(item[2] * multiplier) for item in items]
 
     dp = [-1] * (cap_int + 1)
     dp[0] = 0
@@ -452,8 +513,14 @@ def _knapsack_01(items, capacity, skill_capacities):
     selected_items = [[] for _ in range(cap_int + 1)]
     skill_usage_dp = [defaultdict(float) for _ in range(cap_int + 1)]
 
+    iteration_count = 0
+    stop_threshold = max_iterations * 100000
+
     for i in range(n):
         for w in range(cap_int, -1, -1):
+            iteration_count += 1
+            if iteration_count > stop_threshold:
+                break
             if dp[w] == -1:
                 continue
             new_w = w + weights_int[i]
@@ -476,6 +543,8 @@ def _knapsack_01(items, capacity, skill_capacities):
                 dp[new_w] = new_value
                 selected_items[new_w] = selected_items[w] + [i]
                 skill_usage_dp[new_w] = current_usage
+        if iteration_count > stop_threshold:
+            break
 
     best_idx = 0
     for w in range(cap_int + 1):
@@ -483,7 +552,7 @@ def _knapsack_01(items, capacity, skill_capacities):
             best_idx = w
 
     selected = selected_items[best_idx]
-    total_weight = best_idx / 2
+    total_weight = best_idx / multiplier
     skill_usage_final = skill_usage_dp[best_idx]
 
     return selected, dp[best_idx], total_weight, dict(skill_usage_final)
@@ -515,7 +584,9 @@ def run_planning():
     """
     cycle = detect_cycle()
     if cycle:
-        raise ValueError(f"检测到循环依赖: {' → '.join(map(str, cycle))}")
+        cycle_type, path = cycle
+        type_label = "有向环" if cycle_type == 'directed' else "无向环"
+        raise ValueError(f"检测到{type_label}: {' → '.join(map(str, path))}")
 
     with get_conn() as conn:
         c = conn.cursor()
@@ -533,7 +604,7 @@ def run_planning():
         skill_capacities = get_skill_capacity()
 
         for s in stories:
-            s['estimate'] = round_half_hour(s['estimate'])
+            s['estimate'] = round_time(s['estimate'])
             s['skills'] = get_story_skills(s['id'])
 
         story_map = {s['id']: s for s in stories}
@@ -635,7 +706,7 @@ def get_planning_result():
             ''', (sprint_id,))
             stories = [dict(row) for row in c.fetchall()]
             for s in stories:
-                s['estimate'] = round_half_hour(s['estimate'])
+                s['estimate'] = round_time(s['estimate'])
                 if s['skill_breakdown']:
                     s['skill_breakdown'] = json.loads(s['skill_breakdown'])
 
@@ -653,7 +724,7 @@ def get_planning_result():
                 story['dependencies'] = [dict(row) for row in c.fetchall()]
                 story['skills'] = get_story_skills(story['id'])
                 for d in story['dependencies']:
-                    d['estimate'] = round_half_hour(d['estimate'])
+                    d['estimate'] = round_time(d['estimate'])
 
             skill_usage = defaultdict(float)
             for s in stories:
@@ -668,14 +739,14 @@ def get_planning_result():
                     'skill_id': skill_id,
                     'skill_name': sc['name'],
                     'capacity': sc['capacity'],
-                    'used': round_half_hour(usage),
-                    'available': round_half_hour(sc['capacity'] - usage)
+                    'used': round_time(usage),
+                    'available': round_time(sc['capacity'] - usage)
                 })
 
             result.append({
                 'sprint': sprint,
                 'capacity': capacity,
-                'used': round_half_hour(used),
+                'used': round_time(used),
                 'stories': stories,
                 'over_capacity_stories': over_capacity_stories,
                 'blocked_stories': blocked_stories,

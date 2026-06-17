@@ -20,6 +20,7 @@
             <button class="tab-btn" data-tab="sprints">迭代管理</button>
             <button class="tab-btn" data-tab="dependencies">依赖管理</button>
             <button class="tab-btn" data-tab="skills">技能管理</button>
+            <button class="tab-btn" data-tab="config">系统配置</button>
         </nav>
 
         <main>
@@ -37,7 +38,7 @@
                     <h2>添加需求</h2>
                     <form id="story-form" class="form-inline">
                         <input type="text" id="story-title" placeholder="需求标题" required>
-                        <input type="number" id="story-estimate" placeholder="预估工时" step="0.5" min="0" required>
+                        <input type="number" id="story-estimate" placeholder="预估工时" step="0.25" min="0" required>
                         <input type="number" id="story-priority" placeholder="优先级" value="0">
                         <button type="submit" class="btn btn-primary">添加</button>
                     </form>
@@ -54,7 +55,7 @@
                     <h2>添加成员</h2>
                     <form id="member-form" class="form-inline">
                         <input type="text" id="member-name" placeholder="姓名" required>
-                        <input type="number" id="member-capacity" placeholder="每迭代工时" step="0.5" min="0" value="40" required>
+                        <input type="number" id="member-capacity" placeholder="每迭代工时" step="0.25" min="0" value="40" required>
                         <button type="submit" class="btn btn-primary">添加</button>
                     </form>
                 </div>
@@ -104,14 +105,55 @@
             <section id="skills" class="tab-content">
                 <div class="card">
                     <h2>添加技能</h2>
+                    <p class="tip">💡 运营可随时在此添加新技能类型，自动参与容量计算</p>
                     <form id="skill-form" class="form-inline">
-                        <input type="text" id="skill-name" placeholder="技能名称 (如: 前端、后端)" required>
+                        <input type="text" id="skill-name" placeholder="技能名称 (如: 前端、后端、测试、设计)" required>
                         <button type="submit" class="btn btn-primary">添加</button>
                     </form>
                 </div>
                 <div class="card">
                     <h2>技能列表</h2>
                     <div id="skills-list"></div>
+                </div>
+            </section>
+
+            <section id="config" class="tab-content">
+                <div class="card">
+                    <h2>系统配置</h2>
+                    <p class="tip">💡 修改后即时生效，大规模计算可调低精度或降低迭代上限</p>
+                    <div class="config-form">
+                        <div class="config-item">
+                            <label>工时粒度 (小时):</label>
+                            <select id="config-granularity">
+                                <option value="0.25">0.25 (15分钟)</option>
+                                <option value="0.5">0.5 (30分钟)</option>
+                                <option value="1">1 (1小时)</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>背包迭代上限因子:</label>
+                            <input type="number" id="config-iterations" min="1" step="1" value="100">
+                        </div>
+                        <div class="config-item">
+                            <label>单迭代需求数量上限:</label>
+                            <input type="number" id="config-max-items" min="1" step="1" value="200">
+                        </div>
+                        <div class="config-item">
+                            <label>排序防抖间隔 (毫秒):</label>
+                            <input type="number" id="config-debounce" min="100" step="50" value="500">
+                        </div>
+                        <div class="config-item">
+                            <label>无向环检测:</label>
+                            <select id="config-undirected">
+                                <option value="true">开启</option>
+                                <option value="false">关闭</option>
+                            </select>
+                        </div>
+                        <div class="config-actions">
+                            <button class="btn btn-primary" onclick="saveConfig()">💾 保存配置</button>
+                            <button class="btn btn-secondary" onclick="resetAllConfig()">↺ 重置默认</button>
+                        </div>
+                    </div>
                 </div>
             </section>
         </main>
@@ -129,7 +171,7 @@
                 <select id="story-skill-select">
                     <option value="">选择技能</option>
                 </select>
-                <input type="number" id="story-skill-hours" placeholder="所需工时" step="0.5" min="0" value="0">
+                <input type="number" id="story-skill-hours" placeholder="所需工时" step="0.25" min="0" value="0">
                 <button type="submit" class="btn btn-primary">添加/更新</button>
             </form>
             <div id="story-skills-list"></div>
@@ -149,7 +191,7 @@
                     <select id="member-skill-select">
                         <option value="">选择技能</option>
                     </select>
-                    <input type="number" id="member-skill-capacity" placeholder="每迭代容量" step="0.5" min="0" value="0">
+                    <input type="number" id="member-skill-capacity" placeholder="每迭代容量" step="0.25" min="0" value="0">
                     <button type="submit" class="btn btn-primary">添加/更新</button>
                 </form>
                 <div id="member-skills-list"></div>

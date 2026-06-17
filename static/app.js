@@ -6,16 +6,21 @@ let stories = [];
 let dependencies = [];
 let planningResult = [];
 let skills = [];
+let appConfig = {};
 
 let currentStorySkillId = null;
 let currentMemberSkillId = null;
 let draggedItem = null;
+
+let reorderDebounceTimer = null;
+let pendingReorder = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     setupTabs();
     setupForms();
     setupDragAndDrop();
     loadAllData();
+    loadConfig();
 });
 
 function setupTabs() {
@@ -40,6 +45,7 @@ function setupTabs() {
                 checkCycle();
             }
             if (tab === 'skills') loadSkills();
+            if (tab === 'config') loadConfig();
         });
     });
 }
@@ -180,13 +186,22 @@ function setupDragAndDrop() {
         e.preventDefault();
         const items = list.querySelectorAll('.story-item-draggable');
         const orderedIds = Array.from(items).map(item => parseInt(item.dataset.id));
-        try {
-            await apiPost('/stories/reorder', { ordered_ids: orderedIds });
-            showToast('排序已保存');
-        } catch (err) {
-            showToast('排序保存失败', true);
-            loadStories();
-        }
+        pendingReorder = orderedIds;
+
+        if (reorderDebounceTimer) clearTimeout(reorderDebounceTimer);
+        const debounceMs = appConfig.reorder_debounce_ms || 500;
+        reorderDebounceTimer = setTimeout(async () => {
+            const finalOrder = pendingReorder;
+            try {
+                await apiPost('/stories/reorder', { ordered_ids: finalOrder });
+                showToast('排序已保存');
+            } catch (err) {
+                showToast('排序保存失败', true);
+                loadStories();
+            }
+            reorderDebounceTimer = null;
+            pendingReorder = null;
+        }, debounceMs);
     });
 }
 
@@ -697,4 +712,45 @@ async function apiDelete(path, data) {
         throw new Error(errData.error || `请求失败 (${res.status})`);
     }
     return res.json();
+}
+
+async function loadConfig() {
+    try {
+        appConfig = await apiGet('/config');
+        document.getElementById('config-granularity').value = String(appConfig.time_granularity);
+        document.getElementById('config-iterations').value = appConfig.knapsack_max_iterations;
+        document.getElementById('config-max-items').value = appConfig.knapsack_max_items;
+        document.getElementById('config-debounce').value = appConfig.reorder_debounce_ms;
+        document.getElementById('config-undirected').value = String(appConfig.cycle_detection_undirected);
+    } catch (e) {
+    }
+}
+
+async function saveConfig() {
+    const data = {
+        time_granularity: parseFloat(document.getElementById('config-granularity').value),
+        knapsack_max_iterations: parseInt(document.getElementById('config-iterations').value),
+        knapsack_max_items: parseInt(document.getElementById('config-max-items').value),
+        reorder_debounce_ms: parseInt(document.getElementById('config-debounce').value),
+        cycle_detection_undirected: document.getElementById('config-undirected').value === 'true'
+    };
+    try {
+        const res = await apiPost('/config', data);
+        appConfig = res.config;
+        showToast('配置已保存');
+    } catch (err) {
+        showToast('配置保存失败: ' + err.message, true);
+    }
+}
+
+async function resetAllConfig() {
+    if (!confirm('确定重置为默认配置？')) return;
+    try {
+        const res = await apiPost('/config/reset', {});
+        appConfig = res.config;
+        loadConfig();
+        showToast('已重置为默认配置');
+    } catch (err) {
+        showToast('重置失败: ' + err.message, true);
+    }
 }
