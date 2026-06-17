@@ -20,6 +20,46 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/api/skills', methods=['GET'])
+def list_skills():
+    return jsonify(planner.get_all_skills())
+
+
+@app.route('/api/skills', methods=['POST'])
+def create_skill():
+    data = request.json
+    skill_id = planner.add_skill(data['name'])
+    return jsonify({'id': skill_id}), 201
+
+
+@app.route('/api/skills/<int:skill_id>', methods=['DELETE'])
+def delete_skill(skill_id):
+    planner.delete_skill(skill_id)
+    return jsonify({'success': True})
+
+
+@app.route('/api/skills/capacity', methods=['GET'])
+def get_skills_capacity():
+    return jsonify(planner.get_skill_capacity())
+
+
+@app.route('/api/members/<int:member_id>/skills', methods=['POST'])
+def set_member_skill(member_id):
+    data = request.json
+    planner.set_member_skill(
+        member_id,
+        data['skill_id'],
+        data['capacity_per_sprint']
+    )
+    return jsonify({'success': True})
+
+
+@app.route('/api/members/<int:member_id>/skills/<int:skill_id>', methods=['DELETE'])
+def remove_member_skill(member_id, skill_id):
+    planner.remove_member_skill(member_id, skill_id)
+    return jsonify({'success': True})
+
+
 @app.route('/api/members', methods=['GET'])
 def list_members():
     return jsonify(planner.get_all_members())
@@ -107,8 +147,34 @@ def update_story(story_id):
         title=data.get('title'),
         estimate=data.get('estimate'),
         priority=data.get('priority'),
-        status=data.get('status')
+        status=data.get('status'),
+        display_order=data.get('display_order')
     )
+    return jsonify({'success': True})
+
+
+@app.route('/api/stories/reorder', methods=['POST'])
+def reorder_stories():
+    data = request.json
+    ordered_ids = data['ordered_ids']
+    planner.reorder_stories(ordered_ids)
+    return jsonify({'success': True})
+
+
+@app.route('/api/stories/<int:story_id>/skills', methods=['POST'])
+def set_story_skill(story_id):
+    data = request.json
+    planner.set_story_skill(
+        story_id,
+        data['skill_id'],
+        data['required_hours']
+    )
+    return jsonify({'success': True})
+
+
+@app.route('/api/stories/<int:story_id>/skills/<int:skill_id>', methods=['DELETE'])
+def remove_story_skill(story_id, skill_id):
+    planner.remove_story_skill(story_id, skill_id)
     return jsonify({'success': True})
 
 
@@ -140,10 +206,19 @@ def remove_dependency():
     return jsonify({'success': True})
 
 
+@app.route('/api/dependencies/check-cycle', methods=['GET'])
+def check_cycle():
+    cycle = planner.detect_cycle()
+    return jsonify({'has_cycle': cycle is not None, 'cycle': cycle})
+
+
 @app.route('/api/planning/run', methods=['POST'])
 def run_planning():
-    result = planner.run_planning()
-    return jsonify(result)
+    try:
+        result = planner.run_planning()
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
 
 @app.route('/api/planning/result', methods=['GET'])

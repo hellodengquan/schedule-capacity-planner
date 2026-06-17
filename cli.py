@@ -7,11 +7,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.database import init_db
 from src import planner
 
-
 RED = '\033[91m'
 GREEN = '\033[92m'
 YELLOW = '\033[93m'
 BLUE = '\033[94m'
+PURPLE = '\033[95m'
 BOLD = '\033[1m'
 END = '\033[0m'
 
@@ -23,41 +23,84 @@ def print_header(text):
 
 
 def print_menu():
-    print_header("排期容量规划工具")
-    print(f"{GREEN}1.{END} 成员管理")
-    print(f"{GREEN}2.{END} 迭代管理")
-    print(f"{GREEN}3.{END} 需求管理")
-    print(f"{GREEN}4.{END} 依赖管理")
-    print(f"{GREEN}5.{END} 运行排期规划")
-    print(f"{GREEN}6.{END} 查看规划结果")
-    print(f"{GREEN}7.{END} 加载示例数据")
+    print_header("排期容量规划工具 (增强版)")
+    print(f"{GREEN}1.{END} 技能管理")
+    print(f"{GREEN}2.{END} 成员管理")
+    print(f"{GREEN}3.{END} 迭代管理")
+    print(f"{GREEN}4.{END} 需求管理")
+    print(f"{GREEN}5.{END} 依赖管理 (自动环检测)")
+    print(f"{GREEN}6.{END} 运行排期规划 (0-1背包算法)")
+    print(f"{GREEN}7.{END} 查看规划结果")
+    print(f"{GREEN}8.{END} 加载示例数据")
     print(f"{GREEN}0.{END} 退出")
     print()
+
+
+def manage_skills():
+    while True:
+        print_header("技能管理")
+        skills = planner.get_all_skills()
+        skill_caps = planner.get_skill_capacity()
+
+        if not skills:
+            print(f"{YELLOW}暂无技能{END}\n")
+        else:
+            print(f"{'ID':<5} {'名称':<20} {'总容量':<10}")
+            print("-" * 40)
+            for s in skills:
+                cap = skill_caps.get(s['id'], {}).get('capacity', 0)
+                print(f"{s['id']:<5} {s['name']:<20} {cap:<10.1f} 工时/迭代")
+            print()
+
+        print(f"{GREEN}1.{END} 添加技能")
+        print(f"{GREEN}2.{END} 删除技能")
+        print(f"{GREEN}0.{END} 返回主菜单")
+        print()
+        choice = input("请选择: ").strip()
+
+        if choice == '1':
+            name = input("技能名称 (如: 前端、后端、测试): ").strip()
+            planner.add_skill(name)
+            print(f"\n{GREEN}技能添加成功！{END}\n")
+        elif choice == '2':
+            sid = int(input("技能ID: ").strip())
+            planner.delete_skill(sid)
+            print(f"\n{GREEN}技能删除成功！{END}\n")
+        elif choice == '0':
+            break
 
 
 def manage_members():
     while True:
         print_header("成员管理")
         members = planner.get_all_members()
+        skills = planner.get_all_skills()
+        skill_map = {s['id']: s['name'] for s in skills}
+
         if not members:
             print(f"{YELLOW}暂无成员{END}\n")
         else:
-            print(f"{'ID':<5} {'姓名':<20} {'每迭代容量':<10}")
-            print("-" * 40)
             for m in members:
-                print(f"{m['id']:<5} {m['name']:<20} {m['capacity_per_sprint']:<10.1f}")
+                print(f"{BOLD}[{m['id']}]{END} {m['name']} - 总容量: {m['capacity_per_sprint']:.1f} 工时/迭代")
+                if m['skills']:
+                    skill_strs = [f"{skill_map.get(sk['skill_id'], '?')}: {sk['capacity_per_sprint']:.1f}h"
+                                  for sk in m['skills']]
+                    print(f"      技能: {', '.join(skill_strs)}")
+                else:
+                    print(f"      {YELLOW}未设置技能{END}")
             print()
 
         print(f"{GREEN}1.{END} 添加成员")
         print(f"{GREEN}2.{END} 修改成员")
         print(f"{GREEN}3.{END} 删除成员")
+        print(f"{GREEN}4.{END} 设置成员技能")
         print(f"{GREEN}0.{END} 返回主菜单")
         print()
         choice = input("请选择: ").strip()
 
         if choice == '1':
             name = input("姓名: ").strip()
-            capacity = float(input("每迭代容量(工时): ").strip())
+            capacity = float(input("每迭代总容量(工时, 支持0.5小时精度): ").strip())
             planner.add_member(name, capacity)
             print(f"\n{GREEN}成员添加成功！{END}\n")
         elif choice == '2':
@@ -71,6 +114,16 @@ def manage_members():
             mid = int(input("成员ID: ").strip())
             planner.delete_member(mid)
             print(f"\n{GREEN}成员删除成功！{END}\n")
+        elif choice == '4':
+            mid = int(input("成员ID: ").strip())
+            print("\n可用技能:")
+            for s in skills:
+                print(f"  {s['id']}. {s['name']}")
+            print()
+            sid = int(input("技能ID: ").strip())
+            cap = float(input("该技能每迭代容量(工时, 支持0.5): ").strip())
+            planner.set_member_skill(mid, sid, cap)
+            print(f"\n{GREEN}成员技能设置成功！{END}\n")
         elif choice == '0':
             break
 
@@ -125,26 +178,35 @@ def manage_stories():
     while True:
         print_header("需求管理")
         stories = planner.get_all_stories()
+        skills = planner.get_all_skills()
+        skill_map = {s['id']: s['name'] for s in skills}
+
         if not stories:
             print(f"{YELLOW}暂无需{END}\n")
         else:
-            print(f"{'ID':<5} {'标题':<30} {'预估工时':<10} {'优先级':<8} {'状态':<12}")
+            print(f"{'ID':<5} {'标题':<25} {'工时':<8} {'优先级':<8} {'排序':<6} {'状态':<12}")
             print("-" * 70)
             for s in stories:
-                print(f"{s['id']:<5} {s['title'][:28]:<30} {s['estimate']:<10.1f} "
-                      f"{s['priority']:<8} {s['status']:<12}")
+                print(f"{s['id']:<5} {s['title'][:23]:<25} {s['estimate']:<8.1f} "
+                      f"{s['priority']:<8} {s['display_order']:<6} {s['status']:<12}")
+                if s['skills']:
+                    skill_strs = [f"{skill_map.get(sk['skill_id'], '?')}: {sk['required_hours']:.1f}h"
+                                  for sk in s['skills']]
+                    print(f"      {PURPLE}技能:{END} {', '.join(skill_strs)}")
             print()
 
         print(f"{GREEN}1.{END} 添加需求")
         print(f"{GREEN}2.{END} 修改需求")
         print(f"{GREEN}3.{END} 删除需求")
+        print(f"{GREEN}4.{END} 设置需求技能")
+        print(f"{GREEN}5.{END} 调整显示顺序")
         print(f"{GREEN}0.{END} 返回主菜单")
         print()
         choice = input("请选择: ").strip()
 
         if choice == '1':
             title = input("需求标题: ").strip()
-            estimate = float(input("预估工时: ").strip())
+            estimate = float(input("预估工时(支持0.5小时精度): ").strip())
             priority = int(input("优先级(数字越大越高): ").strip())
             planner.add_story(title, estimate, priority)
             print(f"\n{GREEN}需求添加成功！{END}\n")
@@ -161,6 +223,25 @@ def manage_stories():
             sid = int(input("需求ID: ").strip())
             planner.delete_story(sid)
             print(f"\n{GREEN}需求删除成功！{END}\n")
+        elif choice == '4':
+            sid = int(input("需求ID: ").strip())
+            print("\n可用技能:")
+            for s in skills:
+                print(f"  {s['id']}. {s['name']}")
+            print()
+            skill_id = int(input("技能ID: ").strip())
+            hours = float(input("该技能所需工时(支持0.5): ").strip())
+            planner.set_story_skill(sid, skill_id, hours)
+            print(f"\n{GREEN}需求技能设置成功！{END}\n")
+        elif choice == '5':
+            print("\n当前需求顺序 (ID: 标题):")
+            for i, s in enumerate(stories):
+                print(f"  {i+1}. [{s['id']}] {s['title']}")
+            print()
+            ordered_input = input("输入新顺序的ID列表，用逗号分隔 (如: 3,1,2): ").strip()
+            ordered_ids = [int(x.strip()) for x in ordered_input.split(',')]
+            planner.reorder_stories(ordered_ids)
+            print(f"\n{GREEN}显示顺序已更新！{END}\n")
         elif choice == '0':
             break
 
@@ -171,6 +252,10 @@ def manage_dependencies():
         deps = planner.get_all_dependencies()
         stories = planner.get_all_stories()
         story_map = {s['id']: s['title'] for s in stories}
+
+        cycle = planner.detect_cycle()
+        if cycle:
+            print(f"{RED}⚠️  警告：检测到循环依赖！路径: {' → '.join(map(str, cycle))}{END}\n")
 
         if not deps:
             print(f"{YELLOW}暂无依赖关系{END}\n")
@@ -183,7 +268,7 @@ def manage_dependencies():
                 print(f"{d['id']:<5} {story_title[:28]:<30} 依赖 {dep_title[:28]:<30}")
             print()
 
-        print(f"{GREEN}1.{END} 添加依赖")
+        print(f"{GREEN}1.{END} 添加依赖 (自动环检测)")
         print(f"{GREEN}2.{END} 删除依赖")
         print(f"{GREEN}0.{END} 返回主菜单")
         print()
@@ -207,10 +292,15 @@ def manage_dependencies():
 
 
 def run_planning():
-    print_header("运行排期规划")
-    result = planner.run_planning()
-    print(f"\n{GREEN}排期规划完成！{END}\n")
-    _print_result(result)
+    print_header("运行排期规划 (0-1背包算法)")
+    print(f"{YELLOW}使用动态规划0-1背包算法优化容量利用率...{END}")
+    print(f"{YELLOW}自动检测: 容量约束 + 技能匹配 + 依赖关系{END}\n")
+    try:
+        result = planner.run_planning()
+        print(f"\n{GREEN}✓ 排期规划完成！(0-1背包算法){END}\n")
+        _print_result(result)
+    except ValueError as e:
+        print(f"\n{RED}✗ 规划失败: {e}{END}\n")
 
 
 def view_result():
@@ -224,6 +314,11 @@ def _print_result(result):
         print(f"{YELLOW}暂无规划数据，请先添加迭代和需求，然后运行排期规划。{END}\n")
         return
 
+    skill_map = {}
+    for item in result:
+        for sb in item.get('skill_breakdown', []):
+            skill_map[sb['skill_id']] = sb['skill_name']
+
     for item in result:
         sprint = item['sprint']
         capacity = item['capacity']
@@ -236,24 +331,35 @@ def _print_result(result):
         issue_tag = f" {RED}[有问题]{END}" if item['has_issues'] else ""
         print(f"{BOLD}{sprint['name']}{END}{issue_tag}")
         print(f"  容量: {capacity:.1f} 工时 | 已用: {status_color}{used:.1f}{END} 工时 ({pct:.1f}%)")
+
+        if item.get('skill_breakdown'):
+            print(f"  {PURPLE}技能分解:{END}")
+            for sb in item['skill_breakdown']:
+                sc = sb['capacity']
+                su = sb['used']
+                spct = (su / sc * 100) if sc > 0 else 0
+                sk_color = RED if spct > 100 else GREEN
+                print(f"    {sb['skill_name']}: {sk_color}{su:.1f}{END}/{sc:.1f}h ({spct:.0f}%)")
         print()
 
         if not stories:
             print(f"  {YELLOW}无需求{END}")
         else:
-            print(f"  {'ID':<5} {'标题':<30} {'工时':<8} {'优先级':<8} {'状态':<15}")
-            print(f"  {'-' * 66}")
+            print(f"  {'ID':<5} {'标题':<30} {'工时':<8} {'优先级':<8} {'状态':<20}")
+            print(f"  {'-' * 75}")
             for s in stories:
                 status_parts = []
                 if s['is_over_capacity']:
                     status_parts.append(f"{RED}超容量{END}")
                 if s['is_blocked']:
                     status_parts.append(f"{RED}受阻{END}")
+                if s['is_skill_mismatch']:
+                    status_parts.append(f"{YELLOW}技能不匹配{END}")
                 if not status_parts:
                     status_parts.append(f"{GREEN}正常{END}")
                 status_str = " ".join(status_parts)
 
-                is_issue = s['is_over_capacity'] or s['is_blocked']
+                is_issue = s['is_over_capacity'] or s['is_blocked'] or s['is_skill_mismatch']
                 prefix = f"{RED}!{END} " if is_issue else "  "
 
                 print(f"  {s['id']:<5} {s['title'][:28]:<30} {s['estimate']:<8.1f} "
@@ -262,21 +368,34 @@ def _print_result(result):
                 if s['dependencies']:
                     dep_titles = [d['title'] for d in s['dependencies']]
                     print(f"        {YELLOW}依赖: {', '.join(dep_titles)}{END}")
+                if s.get('skills'):
+                    skill_strs = [f"{skill_map.get(sk['skill_id'], '?')}: {sk['required_hours']:.1f}h"
+                                  for sk in s['skills']]
+                    print(f"        {PURPLE}技能: {', '.join(skill_strs)}{END}")
         print()
 
 
 def load_sample_data():
     print_header("加载示例数据")
 
+    skills = ["前端", "后端", "测试", "设计"]
+    skill_ids = {}
+    for name in skills:
+        skill_ids[name] = planner.add_skill(name)
+
     members = [
-        ("张三", 40),
-        ("李四", 40),
-        ("王五", 32),
-        ("赵六", 40),
+        ("张三", 40, [("前端", 30), ("设计", 10)]),
+        ("李四", 40, [("后端", 40)]),
+        ("王五", 32, [("测试", 32)]),
+        ("赵六", 40, [("前端", 20), ("后端", 20)]),
     ]
-    for name, cap in members:
+    member_ids = []
+    for name, cap, skills_data in members:
         try:
-            planner.add_member(name, cap)
+            mid = planner.add_member(name, cap)
+            member_ids.append(mid)
+            for skill_name, skill_cap in skills_data:
+                planner.set_member_skill(mid, skill_ids[skill_name], skill_cap)
         except Exception:
             pass
 
@@ -294,21 +413,23 @@ def load_sample_data():
             pass
 
     stories = [
-        ("用户登录模块", 16, 10),
-        ("用户注册模块", 12, 9),
-        ("个人中心页面", 20, 8),
-        ("商品列表页", 24, 7),
-        ("商品详情页", 16, 6),
-        ("购物车功能", 20, 5),
-        ("订单系统", 32, 4),
-        ("支付集成", 24, 3),
-        ("用户评价系统", 16, 2),
-        ("消息推送", 12, 1),
+        ("用户登录模块", 16, 10, [("前端", 8), ("后端", 8)]),
+        ("用户注册模块", 12, 9, [("前端", 6), ("后端", 6)]),
+        ("个人中心页面", 20, 8, [("前端", 12), ("设计", 8)]),
+        ("商品列表页", 24, 7, [("前端", 16), ("后端", 8)]),
+        ("商品详情页", 16, 6, [("前端", 10), ("后端", 6)]),
+        ("购物车功能", 20, 5, [("前端", 8), ("后端", 12)]),
+        ("订单系统", 32, 4, [("后端", 24), ("测试", 8)]),
+        ("支付集成", 24, 3, [("后端", 16), ("测试", 8)]),
+        ("用户评价系统", 16, 2, [("前端", 8), ("后端", 8)]),
+        ("消息推送", 12, 1, [("后端", 8), ("测试", 4)]),
     ]
     story_ids = []
-    for title, est, pri in stories:
+    for title, est, pri, skills_data in stories:
         sid = planner.add_story(title, est, pri)
         story_ids.append(sid)
+        for skill_name, hours in skills_data:
+            planner.set_story_skill(sid, skill_ids[skill_name], hours)
 
     deps = [
         (2, 1),
@@ -326,10 +447,11 @@ def load_sample_data():
         except Exception:
             pass
 
-    print(f"\n{GREEN}示例数据加载成功！{END}")
-    print(f"  - 成员: {len(members)} 人")
+    print(f"\n{GREEN}✓ 示例数据加载成功！{END}")
+    print(f"  - 技能: {len(skills)} 种")
+    print(f"  - 成员: {len(members)} 人 (含技能分配)")
     print(f"  - 迭代: {len(sprints)} 个")
-    print(f"  - 需求: {len(stories)} 个")
+    print(f"  - 需求: {len(stories)} 个 (含技能需求)")
     print(f"  - 依赖: {len(deps)} 条\n")
 
 
@@ -341,18 +463,20 @@ def main():
         choice = input("请选择: ").strip()
 
         if choice == '1':
-            manage_members()
+            manage_skills()
         elif choice == '2':
-            manage_sprints()
+            manage_members()
         elif choice == '3':
-            manage_stories()
+            manage_sprints()
         elif choice == '4':
-            manage_dependencies()
+            manage_stories()
         elif choice == '5':
-            run_planning()
+            manage_dependencies()
         elif choice == '6':
-            view_result()
+            run_planning()
         elif choice == '7':
+            view_result()
+        elif choice == '8':
             load_sample_data()
         elif choice == '0':
             print(f"\n{GREEN}再见！{END}\n")

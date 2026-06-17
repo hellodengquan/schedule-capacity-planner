@@ -19,6 +19,7 @@
             <button class="tab-btn" data-tab="members">成员管理</button>
             <button class="tab-btn" data-tab="sprints">迭代管理</button>
             <button class="tab-btn" data-tab="dependencies">依赖管理</button>
+            <button class="tab-btn" data-tab="skills">技能管理</button>
         </nav>
 
         <main>
@@ -42,8 +43,9 @@
                     </form>
                 </div>
                 <div class="card">
-                    <h2>需求列表</h2>
-                    <div id="stories-list"></div>
+                    <h2>需求列表 <span class="hint">(拖动排序 · 自动保存</span></h2>
+                    <p class="tip">💡 拖动需求卡片可调整显示顺序，自动同步到后端</p>
+                    <div id="stories-list" class="draggable-list></div>
                 </div>
             </section>
 
@@ -91,14 +93,71 @@
                         </select>
                         <button type="submit" class="btn btn-primary">添加</button>
                     </form>
+                    <div id="cycle-warning" class="alert alert-error hidden"></div>
                 </div>
                 <div class="card">
                     <h2>依赖列表</h2>
                     <div id="dependencies-list"></div>
                 </div>
             </section>
+
+            <section id="skills" class="tab-content">
+                <div class="card">
+                    <h2>添加技能</h2>
+                    <form id="skill-form" class="form-inline">
+                        <input type="text" id="skill-name" placeholder="技能名称 (如: 前端、后端)" required>
+                        <button type="submit" class="btn btn-primary">添加</button>
+                    </form>
+                </div>
+                <div class="card">
+                    <h2>技能列表</h2>
+                    <div id="skills-list"></div>
+                </div>
+            </section>
         </main>
     </div>
+
+    <div id="story-skill-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+            <h3>设置需求技能</h3>
+            <button class="close-btn" onclick="closeModal('story-skill-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="story-skill-info"></p>
+            <form id="story-skill-form">
+                <select id="story-skill-select">
+                    <option value="">选择技能</option>
+                </select>
+                <input type="number" id="story-skill-hours" placeholder="所需工时" step="0.5" min="0" value="0">
+                <button type="submit" class="btn btn-primary">添加/更新</button>
+            </form>
+            <div id="story-skills-list"></div>
+        </div>
+    </div>
+    </div>
+
+    <div id="member-skill-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>设置成员技能</h3>
+                <button class="close-btn" onclick="closeModal('member-skill-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="member-skill-info"></p>
+                <form id="member-skill-form">
+                    <select id="member-skill-select">
+                        <option value="">选择技能</option>
+                    </select>
+                    <input type="number" id="member-skill-capacity" placeholder="每迭代容量" step="0.5" min="0" value="0">
+                    <button type="submit" class="btn btn-primary">添加/更新</button>
+                </form>
+                <div id="member-skills-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
 
     <script src="/static/app.js"></script>
 </body>

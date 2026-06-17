@@ -5,10 +5,16 @@ let sprints = [];
 let stories = [];
 let dependencies = [];
 let planningResult = [];
+let skills = [];
+
+let currentStorySkillId = null;
+let currentMemberSkillId = null;
+let draggedItem = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     setupTabs();
     setupForms();
+    setupDragAndDrop();
     loadAllData();
 });
 
@@ -31,7 +37,9 @@ function setupTabs() {
             if (tab === 'dependencies') {
                 loadStories();
                 loadDependencies();
+                checkCycle();
             }
+            if (tab === 'skills') loadSkills();
         });
     });
 }
@@ -47,6 +55,7 @@ function setupForms() {
         e.target.reset();
         document.getElementById('story-priority').value = '0';
         loadStories();
+        showToast('需求添加成功');
     });
 
     document.getElementById('member-form').addEventListener('submit', async (e) => {
@@ -58,6 +67,7 @@ function setupForms() {
         e.target.reset();
         document.getElementById('member-capacity').value = '40';
         loadMembers();
+        showToast('成员添加成功');
     });
 
     document.getElementById('sprint-form').addEventListener('submit', async (e) => {
@@ -69,6 +79,7 @@ function setupForms() {
         await apiPost('/sprints', { name, start_date, end_date });
         e.target.reset();
         loadSprints();
+        showToast('迭代添加成功');
     });
 
     document.getElementById('dependency-form').addEventListener('submit', async (e) => {
@@ -80,10 +91,117 @@ function setupForms() {
             await apiPost('/dependencies', { story_id, depends_on_id });
             e.target.reset();
             loadDependencies();
+            checkCycle();
+            showToast('依赖添加成功');
         } catch (err) {
-            alert('添加失败：' + err.message);
+            document.getElementById('cycle-warning').textContent = err.message;
+            document.getElementById('cycle-warning').classList.remove('hidden');
+            setTimeout(() => {
+                document.getElementById('cycle-warning').classList.add('hidden');
+            }, 3000);
         }
     });
+
+    document.getElementById('skill-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('skill-name').value;
+        await apiPost('/skills', { name });
+        e.target.reset();
+        loadSkills();
+        showToast('技能添加成功');
+    });
+
+    document.getElementById('story-skill-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const skill_id = parseInt(document.getElementById('story-skill-select').value);
+        const required_hours = parseFloat(document.getElementById('story-skill-hours').value) || 0;
+        if (!skill_id) return;
+
+        await apiPost(`/stories/${currentStorySkillId}/skills`, { skill_id, required_hours });
+        loadStorySkills(currentStorySkillId);
+        e.target.reset();
+        showToast('技能设置成功');
+    });
+
+    document.getElementById('member-skill-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const skill_id = parseInt(document.getElementById('member-skill-select').value);
+        const capacity_per_sprint = parseFloat(document.getElementById('member-skill-capacity').value) || 0;
+        if (!skill_id) return;
+
+        await apiPost(`/members/${currentMemberSkillId}/skills`, { skill_id, capacity_per_sprint });
+        loadMemberSkills(currentMemberSkillId);
+        e.target.reset();
+        showToast('技能设置成功');
+    });
+}
+
+function setupDragAndDrop() {
+    const list = document.getElementById('stories-list');
+
+    list.addEventListener('dragstart', (e) => {
+        if (e.target.classList.contains('story-item-draggable')) {
+            draggedItem = e.target;
+            e.target.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        }
+    });
+
+    list.addEventListener('dragend', (e) => {
+        if (e.target.classList.contains('story-item-draggable')) {
+            e.target.classList.remove('dragging');
+        }
+        document.querySelectorAll('.story-item-draggable').forEach(item => {
+            item.classList.remove('drag-over');
+        });
+    });
+
+    list.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+
+        const afterElement = getDragAfterElement(list, e.clientY);
+        const current = document.querySelector('.dragging');
+        if (afterElement == null) {
+            list.appendChild(current);
+        } else {
+            list.insertBefore(current, afterElement);
+        }
+
+        document.querySelectorAll('.story-item-draggable').forEach(item => {
+            item.classList.remove('drag-over');
+        });
+        if (afterElement) {
+            afterElement.classList.add('drag-over');
+        }
+    });
+
+    list.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        const items = list.querySelectorAll('.story-item-draggable');
+        const orderedIds = Array.from(items).map(item => parseInt(item.dataset.id));
+        try {
+            await apiPost('/stories/reorder', { ordered_ids: orderedIds });
+            showToast('排序已保存');
+        } catch (err) {
+            showToast('排序保存失败', true);
+            loadStories();
+        }
+    });
+}
+
+function getDragAfterElement(container, y) {
+    const draggableElements = [...container.querySelectorAll('.story-item-draggable:not(.dragging)')];
+
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) {
+            return { offset: offset, element: child };
+        } else {
+            return closest;
+        }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
 }
 
 async function loadAllData() {
@@ -91,8 +209,28 @@ async function loadAllData() {
         loadMembers(),
         loadSprints(),
         loadStories(),
+        loadSkills(),
         loadPlanningResult()
     ]);
+}
+
+async function loadSkills() {
+    skills = await apiGet('/skills');
+    renderSkills();
+    populateSkillSelects();
+}
+
+function populateSkillSelects() {
+    const storySelect = document.getElementById('story-skill-select');
+    const memberSelect = document.getElementById('member-skill-select');
+
+    storySelect.innerHTML = '<option value="">选择技能</option>';
+    memberSelect.innerHTML = '<option value="">选择技能</option>';
+
+    skills.forEach(skill => {
+        storySelect.innerHTML += `<option value="${skill.id}">${skill.name}</option>`;
+        memberSelect.innerHTML += `<option value="${skill.id}">${skill.name}</option>`;
+    });
 }
 
 async function loadMembers() {
@@ -108,7 +246,7 @@ async function loadSprints() {
 async function loadStories() {
     stories = await apiGet('/stories');
     renderStories();
-    updateDependencySelects();
+    populateStorySelects();
 }
 
 async function loadDependencies() {
@@ -121,297 +259,416 @@ async function loadPlanningResult() {
     renderPlanningResult();
 }
 
+async function checkCycle() {
+    try {
+        const result = await apiGet('/dependencies/check-cycle');
+        const warning = document.getElementById('cycle-warning');
+        if (result.has_cycle) {
+            warning.textContent = `⚠️ 检测到循环依赖：${result.cycle.join(' → ')}`;
+            warning.classList.remove('hidden');
+        } else {
+            warning.classList.add('hidden');
+        }
+    } catch (e) {
+    }
+}
+
 async function runPlanning() {
-    planningResult = await apiPost('/planning/run', {});
-    renderPlanningResult();
+    try {
+        planningResult = await apiPost('/planning/run', {});
+        renderPlanningResult();
+        showToast('排期规划完成 (0-1背包算法)');
+    } catch (err) {
+        showToast('规划失败: ' + err.message, true);
+    }
 }
 
 async function loadSampleData() {
-    const sampleMembers = [
-        ['张三', 40],
-        ['李四', 40],
-        ['王五', 32],
-        ['赵六', 40],
+    const storiesData = [
+        { title: '用户登录模块', estimate: 16, priority: 10 },
+        { title: '用户注册模块', estimate: 12, priority: 9 },
+        { title: '个人中心页面', estimate: 20, priority: 8 },
+        { title: '商品列表页', estimate: 24, priority: 7 },
+        { title: '商品详情页', estimate: 16, priority: 6 },
+        { title: '购物车功能', estimate: 20, priority: 5 },
+        { title: '订单系统', estimate: 32, priority: 4 },
+        { title: '支付集成', estimate: 24, priority: 3 },
+        { title: '用户评价系统', estimate: 16, priority: 2 },
+        { title: '消息推送', estimate: 12, priority: 1 },
     ];
-    for (const [name, cap] of sampleMembers) {
-        try {
-            await apiPost('/members', { name, capacity_per_sprint: cap });
-        } catch (e) {}
+
+    const membersData = [
+        { name: '张三', capacity: 40 },
+        { name: '李四', capacity: 40 },
+        { name: '王五', capacity: 32 },
+        { name: '赵六', capacity: 40 },
+    ];
+
+    const sprintsData = [
+        { name: 'Sprint 1', start: '2026-01-05', end: '2026-01-16' },
+        { name: 'Sprint 2', start: '2026-01-19', end: '2026-01-30' },
+        { name: 'Sprint 3', start: '2026-02-02', end: '2026-02-13' },
+    ];
+
+    for (const m of membersData) {
+        await apiPost('/members', m);
+    }
+    for (const s of sprintsData) {
+        await apiPost('/sprints', { name: s.name, start_date: s.start, end_date: s.end });
+    }
+    for (const s of storiesData) {
+        await apiPost('/stories', s);
     }
 
-    const sampleSprints = [
-        ['Sprint 1', '2026-01-05', '2026-01-16'],
-        ['Sprint 2', '2026-01-19', '2026-01-30'],
-        ['Sprint 3', '2026-02-02', '2026-02-13'],
-    ];
-    const sprintIds = [];
-    for (const [name, start, end] of sampleSprints) {
-        try {
-            const res = await apiPost('/sprints', { name, start_date: start, end_date: end });
-            sprintIds.push(res.id);
-        } catch (e) {}
-    }
-
-    const sampleStories = [
-        ['用户登录模块', 16, 10],
-        ['用户注册模块', 12, 9],
-        ['个人中心页面', 20, 8],
-        ['商品列表页', 24, 7],
-        ['商品详情页', 16, 6],
-        ['购物车功能', 20, 5],
-        ['订单系统', 32, 4],
-        ['支付集成', 24, 3],
-        ['用户评价系统', 16, 2],
-        ['消息推送', 12, 1],
-    ];
-    const storyIds = [];
-    for (const [title, est, pri] of sampleStories) {
-        const res = await apiPost('/stories', { title, estimate: est, priority: pri });
-        storyIds.push(res.id);
-    }
-
-    const deps = [
-        [1, 0],
-        [2, 0],
-        [4, 3],
-        [5, 4],
-        [6, 5],
-        [7, 6],
-        [8, 2],
-        [9, 2],
-    ];
-    for (const [si, di] of deps) {
-        try {
-            await apiPost('/dependencies', { story_id: storyIds[si], depends_on_id: storyIds[di] });
-        } catch (e) {}
-    }
-
+    showToast('示例数据加载成功');
     loadAllData();
-    alert('示例数据加载成功！');
-}
-
-function renderMembers() {
-    const container = document.getElementById('members-list');
-    if (members.length === 0) {
-        container.innerHTML = emptyState('👥', '暂无成员');
-        return;
-    }
-
-    let html = '<table><thead><tr><th>ID</th><th>姓名</th><th>每迭代容量</th><th>操作</th></tr></thead><tbody>';
-    members.forEach(m => {
-        html += `<tr>
-            <td>${m.id}</td>
-            <td>${escapeHtml(m.name)}</td>
-            <td>${m.capacity_per_sprint} 工时</td>
-            <td>
-                <button class="btn btn-danger btn-sm" onclick="deleteMember(${m.id})">删除</button>
-            </td>
-        </tr>`;
-    });
-    html += '</tbody></table>';
-    container.innerHTML = html;
-}
-
-function renderSprints() {
-    const container = document.getElementById('sprints-list');
-    if (sprints.length === 0) {
-        container.innerHTML = emptyState('📅', '暂无迭代');
-        return;
-    }
-
-    let html = '<table><thead><tr><th>ID</th><th>名称</th><th>容量</th><th>开始日期</th><th>结束日期</th><th>操作</th></tr></thead><tbody>';
-    sprints.forEach(s => {
-        html += `<tr>
-            <td>${s.id}</td>
-            <td>${escapeHtml(s.name)}</td>
-            <td>${s.capacity} 工时</td>
-            <td>${s.start_date || '-'}</td>
-            <td>${s.end_date || '-'}</td>
-            <td>
-                <button class="btn btn-danger btn-sm" onclick="deleteSprint(${s.id})">删除</button>
-            </td>
-        </tr>`;
-    });
-    html += '</tbody></table>';
-    container.innerHTML = html;
-}
-
-function renderStories() {
-    const container = document.getElementById('stories-list');
-    if (stories.length === 0) {
-        container.innerHTML = emptyState('📝', '暂无需');
-        return;
-    }
-
-    let html = '<table><thead><tr><th>ID</th><th>标题</th><th>预估工时</th><th>优先级</th><th>状态</th><th>依赖</th><th>操作</th></tr></thead><tbody>';
-    stories.forEach(s => {
-        const depTitles = s.dependencies ? s.dependencies.map(d => d.title).join(', ') : '-';
-        html += `<tr>
-            <td>${s.id}</td>
-            <td>${escapeHtml(s.title)}</td>
-            <td>${s.estimate}</td>
-            <td>${s.priority}</td>
-            <td>${s.status}</td>
-            <td>${escapeHtml(depTitles)}</td>
-            <td>
-                <button class="btn btn-danger btn-sm" onclick="deleteStory(${s.id})">删除</button>
-            </td>
-        </tr>`;
-    });
-    html += '</tbody></table>';
-    container.innerHTML = html;
-}
-
-function updateDependencySelects() {
-    const storySelect = document.getElementById('dep-story');
-    const dependsSelect = document.getElementById('dep-depends');
-
-    const options = stories.map(s => `<option value="${s.id}">${escapeHtml(s.title)}</option>`).join('');
-    storySelect.innerHTML = '<option value="">选择需求</option>' + options;
-    dependsSelect.innerHTML = '<option value="">选择依赖需求</option>' + options;
-}
-
-function renderDependencies() {
-    const container = document.getElementById('dependencies-list');
-    if (dependencies.length === 0) {
-        container.innerHTML = emptyState('🔗', '暂无依赖关系');
-        return;
-    }
-
-    const storyMap = {};
-    stories.forEach(s => storyMap[s.id] = s.title);
-
-    let html = '<table><thead><tr><th>ID</th><th>需求</th><th></th><th>依赖</th><th>操作</th></tr></thead><tbody>';
-    dependencies.forEach(d => {
-        const storyTitle = storyMap[d.story_id] || `#${d.story_id}`;
-        const depTitle = storyMap[d.depends_on_id] || `#${d.depends_on_id}`;
-        html += `<tr>
-            <td>${d.id}</td>
-            <td>${escapeHtml(storyTitle)}</td>
-            <td>→ 依赖 →</td>
-            <td>${escapeHtml(depTitle)}</td>
-            <td>
-                <button class="btn btn-danger btn-sm" onclick="removeDependency(${d.story_id}, ${d.depends_on_id})">移除</button>
-            </td>
-        </tr>`;
-    });
-    html += '</tbody></table>';
-    container.innerHTML = html;
-}
-
-function renderPlanningResult() {
-    const container = document.getElementById('planning-result');
-    if (planningResult.length === 0) {
-        container.innerHTML = emptyState('📊', '暂无规划数据，请先添加迭代和需求，然后点击"运行排期规划"');
-        return;
-    }
-
-    let html = '';
-    planningResult.forEach(item => {
-        const sprint = item.sprint;
-        const pct = item.capacity > 0 ? (item.used / item.capacity * 100) : 0;
-        const isOver = pct > 100;
-        const hasIssues = item.has_issues;
-
-        html += `<div class="sprint-card ${hasIssues ? 'has-issues' : ''}">
-            <div class="sprint-header">
-                <h3>
-                    ${escapeHtml(sprint.name)}
-                    ${hasIssues ? '<span class="issue-badge">有问题</span>' : ''}
-                </h3>
-                <div class="capacity-info">
-                    容量: ${item.capacity.toFixed(1)} 工时 | 
-                    已用: <strong style="color:${isOver ? '#ff4757' : '#52c41a'}">${item.used.toFixed(1)}</strong> 工时 
-                    (${pct.toFixed(1)}%)
-                </div>
-            </div>
-            <div class="capacity-bar">
-                <div class="capacity-fill ${isOver ? 'over' : ''}" style="width:${Math.min(pct, 100)}%"></div>
-            </div>`;
-
-        if (item.stories.length === 0) {
-            html += '<p style="color:#999;text-align:center;padding:20px;">无需求</p>';
-        } else {
-            item.stories.forEach(s => {
-                const isOverCap = s.is_over_capacity;
-                const isBlocked = s.is_blocked;
-                let classes = [];
-                if (isOverCap) classes.push('over-capacity');
-                if (isBlocked) classes.push('blocked');
-
-                let tags = '';
-                if (isOverCap) tags += '<span class="tag tag-over">超容量</span>';
-                if (isBlocked) tags += '<span class="tag tag-blocked">受阻</span>';
-                tags += `<span class="tag tag-priority">P${s.priority}</span>`;
-
-                let depsHtml = '';
-                if (s.dependencies && s.dependencies.length > 0) {
-                    const depTitles = s.dependencies.map(d => d.title).join(', ');
-                    depsHtml = `<div class="story-deps">🔗 依赖: ${escapeHtml(depTitles)}</div>`;
-                }
-
-                html += `<div class="story-item ${classes.join(' ')}">
-                    <div class="story-info">
-                        <div class="story-title">${escapeHtml(s.title)}</div>
-                        <div class="story-meta">预估: ${s.estimate} 工时</div>
-                        <div class="story-tags">${tags}</div>
-                        ${depsHtml}
-                    </div>
-                </div>`;
-            });
-        }
-
-        html += '</div>';
-    });
-
-    container.innerHTML = html;
-}
-
-function emptyState(icon, text) {
-    return `<div class="empty-state">
-        <div class="empty-state-icon">${icon}</div>
-        <div>${text}</div>
-    </div>`;
-}
-
-async function deleteMember(id) {
-    if (confirm('确定删除该成员吗？')) {
-        await apiDelete(`/members/${id}`);
-        loadMembers();
-    }
-}
-
-async function deleteSprint(id) {
-    if (confirm('确定删除该迭代吗？')) {
-        await apiDelete(`/sprints/${id}`);
-        loadSprints();
-        loadPlanningResult();
-    }
-}
-
-async function deleteStory(id) {
-    if (confirm('确定删除该需求吗？')) {
-        await apiDelete(`/stories/${id}`);
-        loadStories();
-        loadPlanningResult();
-    }
-}
-
-async function removeDependency(storyId, dependsOnId) {
-    if (confirm('确定移除该依赖关系吗？')) {
-        await apiDelete('/dependencies', { story_id: storyId, depends_on_id: dependsOnId });
-        loadDependencies();
-        loadStories();
-    }
 }
 
 function refreshPlanning() {
     loadPlanningResult();
 }
 
+function renderSkills() {
+    const container = document.getElementById('skills-list');
+    if (skills.length === 0) {
+        container.innerHTML = '<p class="empty">暂无技能</p>';
+        return;
+    }
+    container.innerHTML = skills.map(skill => `
+        <div class="list-item">
+            <div class="item-info">
+                <strong>${skill.name}</strong>
+            </div>
+            <div class="item-actions">
+                <button class="btn btn-danger btn-sm" onclick="deleteSkill(${skill.id})">删除</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderMembers() {
+    const container = document.getElementById('members-list');
+    if (members.length === 0) {
+        container.innerHTML = '<p class="empty">暂无成员</p>';
+        return;
+    }
+    container.innerHTML = members.map(m => {
+        const skillStr = (m.skills || []).map(s => `${s.name}: ${s.capacity_per_sprint}h`).join(', ');
+        return `
+        <div class="list-item">
+            <div class="item-info">
+                <strong>${m.name}</strong>
+                <span class="badge badge-info">${m.capacity_per_sprint} 工时/迭代</span>
+                ${skillStr ? `<span class="skills-mini">技能: ${skillStr}</span>` : ''}
+            </div>
+            <div class="item-actions">
+                <button class="btn btn-secondary btn-sm" onclick="openMemberSkillModal(${m.id}, '${m.name}')">技能</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteMember(${m.id})">删除</button>
+            </div>
+        </div>
+    `}).join('');
+}
+
+function renderSprints() {
+    const container = document.getElementById('sprints-list');
+    if (sprints.length === 0) {
+        container.innerHTML = '<p class="empty">暂无迭代</p>';
+        return;
+    }
+    container.innerHTML = sprints.map(s => `
+        <div class="list-item">
+            <div class="item-info">
+                <strong>${s.name}</strong>
+                <span class="badge badge-info">容量: ${s.capacity}h</span>
+                ${s.start_date ? `<span>${s.start_date} ~ ${s.end_date || '-'}</span>` : ''}
+            </div>
+            <div class="item-actions">
+                <button class="btn btn-danger btn-sm" onclick="deleteSprint(${s.id})">删除</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderStories() {
+    const container = document.getElementById('stories-list');
+    if (stories.length === 0) {
+        container.innerHTML = '<p class="empty">暂无需</p>';
+        return;
+    }
+    container.innerHTML = stories.map(s => {
+        const skillStr = (s.skills || []).map(sk => `${sk.name}: ${sk.required_hours}h`).join(', ');
+        return `
+        <div class="story-item story-item-draggable" data-id="${s.id}" draggable="true">
+            <div class="drag-handle">⋮⋮</div>
+            <div class="item-info">
+                <strong>${s.title}</strong>
+                <span class="badge badge-warning">${s.estimate}h</span>
+                <span class="badge badge-primary">优先级: ${s.priority}</span>
+                ${skillStr ? `<span class="skills-mini">技能: ${skillStr}</span>` : ''}
+            </div>
+            <div class="item-actions">
+                <button class="btn btn-secondary btn-sm" onclick="openStorySkillModal(${s.id}, '${s.title}')">技能</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteStory(${s.id})">删除</button>
+            </div>
+        </div>
+    `}).join('');
+}
+
+function renderDependencies() {
+    const container = document.getElementById('dependencies-list');
+    if (dependencies.length === 0) {
+        container.innerHTML = '<p class="empty">暂无依赖</p>';
+        return;
+    }
+    const storyMap = {};
+    stories.forEach(s => { storyMap[s.id] = s.title; });
+
+    container.innerHTML = dependencies.map(d => {
+        const storyTitle = storyMap[d.story_id] || `#${d.story_id}`;
+        const depTitle = storyMap[d.depends_on_id] || `#${d.depends_on_id}`;
+        return `
+        <div class="list-item">
+            <div class="item-info">
+                <span>${storyTitle}</span>
+                <span class="dep-arrow">→</span>
+                <span>${depTitle}</span>
+            </div>
+            <div class="item-actions">
+                <button class="btn btn-danger btn-sm" onclick="removeDependency(${d.story_id}, ${d.depends_on_id})">删除</button>
+            </div>
+        </div>
+    `}).join('');
+}
+
+function populateStorySelects() {
+    const depStory = document.getElementById('dep-story');
+    const depDepends = document.getElementById('dep-depends');
+    const options = stories.map(s => `<option value="${s.id}">${s.title}</option>`).join('');
+    depStory.innerHTML = '<option value="">选择需求</option>' + options;
+    depDepends.innerHTML = '<option value="">选择依赖需求</option>' + options;
+}
+
+function renderPlanningResult() {
+    const container = document.getElementById('planning-result');
+    if (!planningResult || planningResult.length === 0) {
+        container.innerHTML = '<div class="card"><p class="empty">暂无规划结果，请点击"运行排期规划"</p></div>';
+        return;
+    }
+
+    container.innerHTML = planningResult.map(item => {
+        const pct = item.capacity > 0 ? (item.used / item.capacity * 100).toFixed(1) : 0;
+        const overCap = pct > 100;
+        const issueClass = item.has_issues ? 'sprint-issues' : '';
+
+        const storiesHtml = item.stories.map(s => {
+            let statusBadges = '';
+            let rowClass = '';
+            if (s.is_over_capacity) {
+                statusBadges += '<span class="badge badge-danger">超容量</span>';
+                rowClass = 'story-over-capacity';
+            }
+            if (s.is_blocked) {
+                statusBadges += '<span class="badge badge-danger">受阻</span>';
+                rowClass = rowClass || 'story-blocked';
+            }
+            if (s.is_skill_mismatch) {
+                statusBadges += '<span class="badge badge-warning">技能不匹配</span>';
+                rowClass = rowClass || 'story-skill-mismatch';
+            }
+            if (!statusBadges) {
+                statusBadges = '<span class="badge badge-success">正常</span>';
+            }
+
+            const depStr = (s.dependencies || []).map(d => d.title).join(', ');
+            const skillStr = (s.skills || []).map(sk => `${sk.name}: ${sk.required_hours}h`).join(', ');
+
+            return `
+                <div class="story-row ${rowClass}">
+                    <div class="story-row-title">
+                        <strong>${s.title}</strong>
+                        <span class="badge badge-info">${s.estimate}h</span>
+                        ${statusBadges}
+                    </div>
+                    ${depStr ? `<div class="story-row-meta">依赖: ${depStr}</div>` : ''}
+                    ${skillStr ? `<div class="story-row-meta">技能: ${skillStr}</div>` : ''}
+                </div>
+            `;
+        }).join('');
+
+        const skillBreakdownHtml = (item.skill_breakdown || []).map(sb => {
+            const spct = sb.capacity > 0 ? (sb.used / sb.capacity * 100).toFixed(0) : 0;
+            const over = sb.used > sb.capacity;
+            return `
+                <div class="skill-bar">
+                    <span class="skill-name">${sb.skill_name}</span>
+                    <div class="skill-bar-track">
+                        <div class="skill-bar-fill ${over ? 'over' : ''}" style="width: ${Math.min(spct, 100)}%"></div>
+                    </div>
+                    <span class="skill-hours ${over ? 'over' : ''}">${sb.used}/${sb.capacity}h</span>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="card sprint-card ${issueClass}">
+                <div class="sprint-header">
+                    <h3>${item.sprint.name} ${item.has_issues ? '<span class="badge badge-danger">有问题</span>' : ''}</h3>
+                    <div class="capacity-bar">
+                        <div class="capacity-bar-fill ${overCap ? 'over' : ''}" style="width: ${Math.min(pct, 100)}%"></div>
+                    </div>
+                    <span class="capacity-text ${overCap ? 'over' : ''}">${item.used}/${item.capacity}h (${pct}%)</span>
+                </div>
+                ${skillBreakdownHtml ? `<div class="skill-breakdown">${skillBreakdownHtml}</div>` : ''}
+                <div class="stories-container">
+                    ${storiesHtml || '<p class="empty">无需求</p>'}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function deleteSkill(id) {
+    if (!confirm('确定删除此技能？')) return;
+    await apiDelete(`/skills/${id}`);
+    loadSkills();
+    showToast('技能已删除');
+}
+
+async function deleteMember(id) {
+    if (!confirm('确定删除此成员？')) return;
+    await apiDelete(`/members/${id}`);
+    loadMembers();
+    showToast('成员已删除');
+}
+
+async function deleteSprint(id) {
+    if (!confirm('确定删除此迭代？')) return;
+    await apiDelete(`/sprints/${id}`);
+    loadSprints();
+    showToast('迭代已删除');
+}
+
+async function deleteStory(id) {
+    if (!confirm('确定删除此需求？')) return;
+    await apiDelete(`/stories/${id}`);
+    loadStories();
+    showToast('需求已删除');
+}
+
+async function removeDependency(story_id, depends_on_id) {
+    await apiDelete('/dependencies', { story_id, depends_on_id });
+    loadDependencies();
+    checkCycle();
+    showToast('依赖已删除');
+}
+
+async function loadStorySkills(storyId) {
+    const story = stories.find(s => s.id === storyId);
+    if (!story) return;
+
+    const container = document.getElementById('story-skills-list');
+    const storySkills = story.skills || [];
+
+    if (storySkills.length === 0) {
+        container.innerHTML = '<p class="empty">暂无技能设置</p>';
+        return;
+    }
+
+    container.innerHTML = storySkills.map(sk => `
+        <div class="list-item">
+            <div class="item-info">
+                <strong>${sk.name}</strong>
+                <span class="badge badge-info">${sk.required_hours} 工时</span>
+            </div>
+            <div class="item-actions">
+                <button class="btn btn-danger btn-sm" onclick="removeStorySkill(${storyId}, ${sk.skill_id})">移除</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function loadMemberSkills(memberId) {
+    const member = members.find(m => m.id === memberId);
+    if (!member) return;
+
+    const container = document.getElementById('member-skills-list');
+    const memberSkills = member.skills || [];
+
+    if (memberSkills.length === 0) {
+        container.innerHTML = '<p class="empty">暂无技能设置</p>';
+        return;
+    }
+
+    container.innerHTML = memberSkills.map(sk => `
+        <div class="list-item">
+            <div class="item-info">
+                <strong>${sk.name}</strong>
+                <span class="badge badge-info">${sk.capacity_per_sprint} 工时/迭代</span>
+            </div>
+            <div class="item-actions">
+                <button class="btn btn-danger btn-sm" onclick="removeMemberSkill(${memberId}, ${sk.skill_id})">移除</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function removeStorySkill(storyId, skillId) {
+    await apiDelete(`/stories/${storyId}/skills/${skillId}`);
+    const story = stories.find(s => s.id === storyId);
+    if (story) {
+        story.skills = story.skills.filter(sk => sk.skill_id !== skillId);
+    }
+    loadStorySkills(storyId);
+    showToast('技能已移除');
+}
+
+async function removeMemberSkill(memberId, skillId) {
+    await apiDelete(`/members/${memberId}/skills/${skillId}`);
+    const member = members.find(m => m.id === memberId);
+    if (member) {
+        member.skills = member.skills.filter(sk => sk.skill_id !== skillId);
+    }
+    loadMemberSkills(memberId);
+    showToast('技能已移除');
+}
+
+function openStorySkillModal(storyId, storyTitle) {
+    currentStorySkillId = storyId;
+    document.querySelector('#story-skill-modal .story-skill-info').textContent = `需求: ${storyTitle}`;
+    loadStorySkills(storyId);
+    openModal('story-skill-modal');
+}
+
+function openMemberSkillModal(memberId, memberName) {
+    currentMemberSkillId = memberId;
+    document.querySelector('#member-skill-modal .member-skill-info').textContent = `成员: ${memberName}`;
+    loadMemberSkills(memberId);
+    openModal('member-skill-modal');
+}
+
+function openModal(modalId) {
+    document.getElementById(modalId).classList.remove('hidden');
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).classList.add('hidden');
+}
+
+function showToast(message, isError = false) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = `toast ${isError ? 'error' : ''}`;
+    setTimeout(() => {
+        toast.classList.add('hidden');
+    }, 2000);
+}
+
 async function apiGet(path) {
     const res = await fetch(API_BASE + path);
-    if (!res.ok) throw new Error('请求失败');
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `请求失败 (${res.status})`);
+    }
     return res.json();
 }
 
@@ -422,8 +679,8 @@ async function apiPost(path, data) {
         body: JSON.stringify(data)
     });
     if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: '请求失败' }));
-        throw new Error(err.error || '请求失败');
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `请求失败 (${res.status})`);
     }
     return res.json();
 }
@@ -435,12 +692,9 @@ async function apiDelete(path, data) {
         options.body = JSON.stringify(data);
     }
     const res = await fetch(API_BASE + path, options);
-    if (!res.ok) throw new Error('请求失败');
+    if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `请求失败 (${res.status})`);
+    }
     return res.json();
-}
-
-function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
 }
