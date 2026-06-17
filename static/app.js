@@ -14,6 +14,12 @@ let draggedItem = null;
 
 let reorderDebounceTimer = null;
 let pendingReorder = null;
+let isDragging = false;
+let dragStartY = 0;
+
+function formatHours(value) {
+    return parseFloat(value).toFixed(2);
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     setupTabs();
@@ -144,10 +150,12 @@ function setupForms() {
 
 function setupDragAndDrop() {
     const list = document.getElementById('stories-list');
+    let pendingOrder = null;
 
     list.addEventListener('dragstart', (e) => {
         if (e.target.classList.contains('story-item-draggable')) {
             draggedItem = e.target;
+            isDragging = true;
             e.target.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
         }
@@ -160,6 +168,11 @@ function setupDragAndDrop() {
         document.querySelectorAll('.story-item-draggable').forEach(item => {
             item.classList.remove('drag-over');
         });
+        if (isDragging && pendingOrder) {
+            saveReorder();
+        }
+        isDragging = false;
+        pendingOrder = null;
     });
 
     list.addEventListener('dragover', (e) => {
@@ -180,29 +193,35 @@ function setupDragAndDrop() {
         if (afterElement) {
             afterElement.classList.add('drag-over');
         }
+
+        const items = list.querySelectorAll('.story-item-draggable');
+        pendingOrder = Array.from(items).map(item => parseInt(item.dataset.id));
     });
 
-    list.addEventListener('drop', async (e) => {
+    list.addEventListener('drop', (e) => {
         e.preventDefault();
         const items = list.querySelectorAll('.story-item-draggable');
-        const orderedIds = Array.from(items).map(item => parseInt(item.dataset.id));
-        pendingReorder = orderedIds;
-
-        if (reorderDebounceTimer) clearTimeout(reorderDebounceTimer);
-        const debounceMs = appConfig.reorder_debounce_ms || 500;
-        reorderDebounceTimer = setTimeout(async () => {
-            const finalOrder = pendingReorder;
-            try {
-                await apiPost('/stories/reorder', { ordered_ids: finalOrder });
-                showToast('排序已保存');
-            } catch (err) {
-                showToast('排序保存失败', true);
-                loadStories();
-            }
-            reorderDebounceTimer = null;
-            pendingReorder = null;
-        }, debounceMs);
+        pendingOrder = Array.from(items).map(item => parseInt(item.dataset.id));
     });
+
+    list.addEventListener('mouseup', (e) => {
+        if (isDragging && pendingOrder) {
+            saveReorder();
+        }
+    });
+
+    async function saveReorder() {
+        if (!pendingOrder) return;
+        const finalOrder = [...pendingOrder];
+        pendingOrder = null;
+        try {
+            await apiPost('/stories/reorder', { ordered_ids: finalOrder });
+            showToast('排序已保存');
+        } catch (err) {
+            showToast('排序保存失败', true);
+            loadStories();
+        }
+    }
 }
 
 function getDragAfterElement(container, y) {
@@ -368,12 +387,12 @@ function renderMembers() {
         return;
     }
     container.innerHTML = members.map(m => {
-        const skillStr = (m.skills || []).map(s => `${s.name}: ${s.capacity_per_sprint}h`).join(', ');
+        const skillStr = (m.skills || []).map(s => `${s.name}: ${formatHours(s.capacity_per_sprint)}h`).join(', ');
         return `
         <div class="list-item">
             <div class="item-info">
                 <strong>${m.name}</strong>
-                <span class="badge badge-info">${m.capacity_per_sprint} 工时/迭代</span>
+                <span class="badge badge-info">${formatHours(m.capacity_per_sprint)} 工时/迭代</span>
                 ${skillStr ? `<span class="skills-mini">技能: ${skillStr}</span>` : ''}
             </div>
             <div class="item-actions">
@@ -394,7 +413,7 @@ function renderSprints() {
         <div class="list-item">
             <div class="item-info">
                 <strong>${s.name}</strong>
-                <span class="badge badge-info">容量: ${s.capacity}h</span>
+                <span class="badge badge-info">容量: ${formatHours(s.capacity)}h</span>
                 ${s.start_date ? `<span>${s.start_date} ~ ${s.end_date || '-'}</span>` : ''}
             </div>
             <div class="item-actions">
@@ -411,13 +430,13 @@ function renderStories() {
         return;
     }
     container.innerHTML = stories.map(s => {
-        const skillStr = (s.skills || []).map(sk => `${sk.name}: ${sk.required_hours}h`).join(', ');
+        const skillStr = (s.skills || []).map(sk => `${sk.name}: ${formatHours(sk.required_hours)}h`).join(', ');
         return `
         <div class="story-item story-item-draggable" data-id="${s.id}" draggable="true">
             <div class="drag-handle">⋮⋮</div>
             <div class="item-info">
                 <strong>${s.title}</strong>
-                <span class="badge badge-warning">${s.estimate}h</span>
+                <span class="badge badge-warning">${formatHours(s.estimate)}h</span>
                 <span class="badge badge-primary">优先级: ${s.priority}</span>
                 ${skillStr ? `<span class="skills-mini">技能: ${skillStr}</span>` : ''}
             </div>
@@ -495,13 +514,13 @@ function renderPlanningResult() {
             }
 
             const depStr = (s.dependencies || []).map(d => d.title).join(', ');
-            const skillStr = (s.skills || []).map(sk => `${sk.name}: ${sk.required_hours}h`).join(', ');
+            const skillStr = (s.skills || []).map(sk => `${sk.name}: ${formatHours(sk.required_hours)}h`).join(', ');
 
             return `
                 <div class="story-row ${rowClass}">
                     <div class="story-row-title">
                         <strong>${s.title}</strong>
-                        <span class="badge badge-info">${s.estimate}h</span>
+                        <span class="badge badge-info">${formatHours(s.estimate)}h</span>
                         ${statusBadges}
                     </div>
                     ${depStr ? `<div class="story-row-meta">依赖: ${depStr}</div>` : ''}
@@ -519,7 +538,7 @@ function renderPlanningResult() {
                     <div class="skill-bar-track">
                         <div class="skill-bar-fill ${over ? 'over' : ''}" style="width: ${Math.min(spct, 100)}%"></div>
                     </div>
-                    <span class="skill-hours ${over ? 'over' : ''}">${sb.used}/${sb.capacity}h</span>
+                    <span class="skill-hours ${over ? 'over' : ''}">${formatHours(sb.used)}/${formatHours(sb.capacity)}h</span>
                 </div>
             `;
         }).join('');
@@ -531,7 +550,7 @@ function renderPlanningResult() {
                     <div class="capacity-bar">
                         <div class="capacity-bar-fill ${overCap ? 'over' : ''}" style="width: ${Math.min(pct, 100)}%"></div>
                     </div>
-                    <span class="capacity-text ${overCap ? 'over' : ''}">${item.used}/${item.capacity}h (${pct}%)</span>
+                    <span class="capacity-text ${overCap ? 'over' : ''}">${formatHours(item.used)}/${formatHours(item.capacity)}h (${pct}%)</span>
                 </div>
                 ${skillBreakdownHtml ? `<div class="skill-breakdown">${skillBreakdownHtml}</div>` : ''}
                 <div class="stories-container">
@@ -593,7 +612,7 @@ async function loadStorySkills(storyId) {
         <div class="list-item">
             <div class="item-info">
                 <strong>${sk.name}</strong>
-                <span class="badge badge-info">${sk.required_hours} 工时</span>
+                <span class="badge badge-info">${formatHours(sk.required_hours)} 工时</span>
             </div>
             <div class="item-actions">
                 <button class="btn btn-danger btn-sm" onclick="removeStorySkill(${storyId}, ${sk.skill_id})">移除</button>
@@ -618,7 +637,7 @@ async function loadMemberSkills(memberId) {
         <div class="list-item">
             <div class="item-info">
                 <strong>${sk.name}</strong>
-                <span class="badge badge-info">${sk.capacity_per_sprint} 工时/迭代</span>
+                <span class="badge badge-info">${formatHours(sk.capacity_per_sprint)} 工时/迭代</span>
             </div>
             <div class="item-actions">
                 <button class="btn btn-danger btn-sm" onclick="removeMemberSkill(${memberId}, ${sk.skill_id})">移除</button>

@@ -12,7 +12,33 @@ DEFAULT_CONFIG = {
     "cycle_detection_undirected": True
 }
 
+CONFIG_LIMITS = {
+    "knapsack_max_iterations": (1, 10000),
+    "knapsack_max_items": (1, 500),
+    "reorder_debounce_ms": (100, 5000),
+    "time_granularity": (0.0625, 8.0),
+}
+
 _config = None
+
+
+def _validate_config(config):
+    """验证配置值，防止 OOM 和非法值"""
+    validated = dict(config)
+    for key, (min_val, max_val) in CONFIG_LIMITS.items():
+        if key in validated:
+            val = validated[key]
+            if isinstance(val, (int, float)):
+                if val < min_val:
+                    validated[key] = min_val
+                elif val > max_val:
+                    validated[key] = max_val
+    if validated.get('knapsack_max_iterations'):
+        iterations = int(validated['knapsack_max_iterations'])
+        threshold = iterations * 100000
+        if threshold > 1e9:
+            validated['knapsack_max_iterations'] = 10000
+    return validated
 
 
 def load_config():
@@ -23,21 +49,23 @@ def load_config():
         try:
             with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
                 user_config = json.load(f)
-                _config = {**DEFAULT_CONFIG, **user_config}
+                merged = {**DEFAULT_CONFIG, **user_config}
+                _config = _validate_config(merged)
                 return _config
         except Exception:
             pass
-    _config = dict(DEFAULT_CONFIG)
+    _config = _validate_config(dict(DEFAULT_CONFIG))
     return _config
 
 
 def save_config(new_config):
     global _config
     config = load_config()
-    config.update(new_config)
-    _config = config
+    updated = {**config, **new_config}
+    validated = _validate_config(updated)
+    _config = validated
     with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+        json.dump(validated, f, indent=2, ensure_ascii=False)
 
 
 def get_config(key, default=None):
@@ -49,4 +77,4 @@ def reset_config():
     global _config
     if os.path.exists(CONFIG_PATH):
         os.remove(CONFIG_PATH)
-    _config = dict(DEFAULT_CONFIG)
+    _config = _validate_config(dict(DEFAULT_CONFIG))

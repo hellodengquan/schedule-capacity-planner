@@ -118,7 +118,8 @@ def detect_cycle():
 
 
 def check_cycle_if_add(story_id, depends_on_id):
-    """检查如果添加这条依赖是否会形成环（有向+无向）"""
+    """检查如果添加这条依赖是否会形成环（有向+无向）
+    返回: None (无环) 或 ('directed'/'undirected', path) (有环)"""
     with get_conn() as conn:
         c = conn.cursor()
         c.execute('SELECT story_id, depends_on_id FROM dependencies')
@@ -131,15 +132,15 @@ def check_cycle_if_add(story_id, depends_on_id):
 
     directed = detect_cycle_directed(new_story_ids, new_edges)
     if directed:
-        return True
+        return directed
 
     check_undirected = get_config('cycle_detection_undirected', True)
     if check_undirected:
         undirected = detect_cycle_undirected(new_story_ids, new_edges)
         if undirected:
-            return True
+            return undirected
 
-    return False
+    return None
 
 
 def get_skill_capacity():
@@ -194,15 +195,21 @@ def get_all_skills():
 
 
 def add_skill(name):
-    """添加技能"""
+    """添加技能（带 UNIQUE 约束保护）"""
+    name = name.strip()
+    if not name:
+        raise ValueError("技能名称不能为空")
     with get_conn() as conn:
         c = conn.cursor()
+        c.execute('SELECT id FROM skills WHERE name = ? COLLATE NOCASE', (name,))
+        existing = c.fetchone()
+        if existing:
+            raise ValueError(f"技能 '{name}' 已存在")
         try:
             c.execute('INSERT INTO skills (name) VALUES (?)', (name,))
             return c.lastrowid
         except sqlite3.IntegrityError:
-            c.execute('SELECT id FROM skills WHERE name = ?', (name,))
-            return c.fetchone()['id']
+            raise ValueError(f"技能 '{name}' 已存在")
 
 
 def delete_skill(skill_id):
@@ -430,11 +437,15 @@ def delete_story(story_id):
 
 
 def add_dependency(story_id, depends_on_id):
-    """添加依赖关系，带环检测"""
+    """添加依赖关系，带环检测，拒收时输出完整环路径"""
     if story_id == depends_on_id:
         raise ValueError("需求不能依赖自己")
-    if check_cycle_if_add(story_id, depends_on_id):
-        raise ValueError("添加此依赖会形成循环依赖，已拒收")
+    cycle = check_cycle_if_add(story_id, depends_on_id)
+    if cycle:
+        cycle_type, path = cycle
+        type_label = "有向环" if cycle_type == 'directed' else "无向环"
+        path_str = ' → '.join(map(str, path))
+        raise ValueError(f"添加此依赖会形成{type_label}: {path_str}，已拒收")
     with get_conn() as conn:
         c = conn.cursor()
         try:
@@ -443,7 +454,7 @@ def add_dependency(story_id, depends_on_id):
                 (story_id, depends_on_id)
             )
         except sqlite3.IntegrityError:
-            pass
+            raise ValueError("该依赖关系已存在")
         return c.lastrowid
 
 
